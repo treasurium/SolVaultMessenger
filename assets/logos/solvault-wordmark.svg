@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 280" width="800" height="280">
+  <defs>
+    <linearGradient id="sg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#9945FF"/>
+      <stop offset="50%" style="stop-color:#14F195"/>
+      <stop offset="100%" style="stop-color:#00C2FF"/>
+    </linearGradient>
+    <linearGradient id="ig" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0d0d1a"/>
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#9945FF"/>
+      <stop offset="40%" style="stop-color:#14F195"/>
+      <stop offset="100%" style="stop-color:#00C2FF"/>
+    </linearGradient>
+    <filter id="gl">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="sh">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#9945FF" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="800" height="280" rx="20" fill="#0a0a14"/>
+  
+  <!-- Icon -->
+  <g transform="translate(40, 16)">
+    <!-- Shield -->
+    <path d="M124 20 L220 58 L220 125 C220 170 184 202 124 216 C64 202 28 170 28 125 L28 58 Z" 
+          fill="url(#ig)" stroke="url(#sg)" stroke-width="3" filter="url(#sh)"/>
+    
+    <!-- Chat bubble left -->
+    <rect x="58" y="80" rx="10" ry="10" width="75" height="38" fill="url(#sg)" opacity="0.85"/>
+    <polygon points="65,118 58,132 80,118" fill="#9945FF" opacity="0.85"/>
+    
+    <!-- Chat bubble right -->
+    <rect x="88" y="126" rx="10" ry="10" width="75" height="38" fill="url(#sg)" opacity="0.6"/>
+    <polygon points="156,164 163,178 143,164" fill="#00C2FF" opacity="0.6"/>
+    
+    <!-- Lock on top bubble -->
+    <rect x="86" y="90" rx="3" ry="3" width="20" height="16" fill="#0a0a14" opacity="0.85"/>
+    <path d="M90 90 L90 85 C90 80 93 77 96 77 C99 77 102 80 102 85 L102 90" 
+          fill="none" stroke="#0a0a14" stroke-width="3" stroke-linecap="round" opacity="0.85"/>
+    <circle cx="96" cy="97" r="2.5" fill="url(#sg)"/>
+    <rect x="95" y="97" width="2" height="4" rx="1" fill="url(#sg)"/>
+    
+    <!-- Text lines left -->
+    <rect x="65" y="92" rx="1" ry="1" width="14" height="3" fill="#0a0a14" opacity="0.4"/>
+    <rect x="65" y="98" rx="1" ry="1" width="10" height="3" fill="#0a0a14" opacity="0.4"/>
+    <rect x="65" y="104" rx="1" ry="1" width="16" height="3" fill="#0a0a14" opacity="0.4"/>
+    
+    <!-- Text lines right -->
+    <rect x="98" y="138" rx="1" ry="1" width="16" height="3" fill="#0a0a14" opacity="0.4"/>
+    <rect x="98" y="144" rx="1" ry="1" width="20" height="3" fill="#0a0a14" opacity="0.4"/>
+    <rect x="98" y="150" rx="1" ry="1" width="12" height="3" fill="#0a0a14" opacity="0.4"/>
+    
+    <!-- Solana speed lines -->
+    <line x1="68" y1="190" x2="180" y2="190" stroke="url(#sg)" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    <line x1="78" y1="200" x2="170" y2="200" stroke="url(#sg)" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
+  </g>
+  
+  <!-- SolVault Text -->
+  <text x="290" y="135" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-weight="800" font-size="72" fill="url(#textGrad)" letter-spacing="-1">
+    Sol<tspan fill="#ffffff">Vault</tspan>
+  </text>
+  
+  <!-- Messenger subtitle -->
+  <text x="292" y="175" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-weight="300" font-size="28" fill="#ffffff" opacity="0.5" letter-spacing="8">
+    MESSENGER
+  </text>
+  
+  <!-- Tagline -->
+  <text x="292" y="210" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-weight="400" font-size="14" fill="#14F195" opacity="0.6" letter-spacing="3">
+    ENCRYPTED ON-CHAIN MESSAGING
+  </text>
+  
+  <!-- Subtle particles -->
+  <circle cx="760" cy="50" r="2" fill="#14F195" opacity="0.3" filter="url(#gl)"/>
+  <circle cx="740" cy="240" r="1.5" fill="#9945FF" opacity="0.25" filter="url(#gl)"/>
+  <circle cx="280" cy="240" r="2" fill="#00C2FF" opacity="0.2" filter="url(#gl)"/>
+</svg>

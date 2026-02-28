@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f0f1e"/>
+      <stop offset="100%" style="stop-color:#0a0a14"/>
+    </linearGradient>
+    <linearGradient id="s" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#9945FF"/>
+      <stop offset="50%" style="stop-color:#14F195"/>
+      <stop offset="100%" style="stop-color:#00C2FF"/>
+    </linearGradient>
+    <linearGradient id="d" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#16162a"/>
+      <stop offset="100%" style="stop-color:#0d0d1a"/>
+    </linearGradient>
+    <filter id="g">
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#9945FF" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  
+  <!-- App icon rounded rect background -->
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  
+  <!-- Subtle gradient border -->
+  <rect x="4" y="4" width="504" height="504" rx="106" fill="none" stroke="url(#s)" stroke-width="2" opacity="0.25"/>
+  
+  <!-- Shield -->
+  <path d="M256 56 L416 142 L416 296 C416 382 344 440 256 466 C168 440 96 382 96 296 L96 142 Z" 
+        fill="url(#d)" stroke="url(#s)" stroke-width="4.5" filter="url(#g)"/>
+  
+  <!-- Inner shield glow line -->
+  <path d="M256 82 L396 158 L396 288 C396 364 332 416 256 440 C180 416 116 364 116 288 L116 158 Z" 
+        fill="none" stroke="url(#s)" stroke-width="1" opacity="0.15"/>
+
+  <!-- Chat bubble - left (sender) -->
+  <rect x="152" y="180" rx="18" ry="18" width="150" height="72" fill="url(#s)" opacity="0.9"/>
+  <polygon points="164,252 150,280 192,252" fill="#9945FF" opacity="0.9"/>
+  
+  <!-- Chat bubble - right (recipient) -->
+  <rect x="210" y="268" rx="18" ry="18" width="150" height="72" fill="url(#s)" opacity="0.55"/>
+  <polygon points="348,340 362,368 320,340" fill="#00C2FF" opacity="0.55"/>
+
+  <!-- Lock icon centered on top bubble -->
+  <rect x="207" y="203" rx="5" ry="5" width="38" height="30" fill="#0a0a14" opacity="0.9"/>
+  <path d="M214 203 L214 193 C214 183 220 177 226 177 C232 177 238 183 238 193 L238 203" 
+        fill="none" stroke="#0a0a14" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+  <circle cx="226" cy="216" r="4.5" fill="url(#s)"/>
+  <rect x="224" y="216" width="4" height="8" rx="2" fill="url(#s)"/>
+  
+  <!-- Minimalist text lines on left bubble -->
+  <rect x="166" y="198" rx="2" ry="2" width="28" height="5" fill="#0a0a14" opacity="0.4"/>
+  <rect x="166" y="210" rx="2" ry="2" width="20" height="5" fill="#0a0a14" opacity="0.4"/>
+  <rect x="166" y="222" rx="2" ry="2" width="24" height="5" fill="#0a0a14" opacity="0.4"/>
+  <rect x="166" y="234" rx="2" ry="2" width="16" height="5" fill="#0a0a14" opacity="0.4"/>
+  
+  <!-- Minimalist text lines on right bubble -->
+  <rect x="224" y="284" rx="2" ry="2" width="30" height="5" fill="#0a0a14" opacity="0.4"/>
+  <rect x="224" y="296" rx="2" ry="2" width="22" height="5" fill="#0a0a14" opacity="0.4"/>
+  <rect x="224" y="308" rx="2" ry="2" width="28" height="5" fill="#0a0a14" opacity="0.4"/>
+  <rect x="224" y="320" rx="2" ry="2" width="18" height="5" fill="#0a0a14" opacity="0.4"/>
+  
+  <!-- Lock on bottom bubble -->
+  <rect x="268" y="286" rx="4" ry="4" width="30" height="24" fill="#0a0a14" opacity="0.65"/>
+  <path d="M274 286 L274 278 C274 270 279 266 283 266 C287 266 292 270 292 278 L292 286" 
+        fill="none" stroke="#0a0a14" stroke-width="4" stroke-linecap="round" opacity="0.65"/>
+  <circle cx="283" cy="296" r="3.5" fill="url(#s)" opacity="0.7"/>
+  <rect x="281.5" y="296" width="3" height="6" rx="1.5" fill="url(#s)" opacity="0.7"/>
+  
+  <!-- Solana speed bars at bottom -->
+  <line x1="176" y1="390" x2="336" y2="390" stroke="url(#s)" stroke-width="3" stroke-linecap="round" opacity="0.35"/>
+  <line x1="196" y1="406" x2="316" y2="406" stroke="url(#s)" stroke-width="3" stroke-linecap="round" opacity="0.2"/>
+  <line x1="216" y1="422" x2="296" y2="422" stroke="url(#s)" stroke-width="3" stroke-linecap="round" opacity="0.1"/>
+</svg>
