@@ -13,6 +13,7 @@ import {ScreenContainer, Button} from '../../../shared/components';
 import {useAuthStore} from '../../../stores/authStore';
 import {useWalletStore} from '../../../stores/walletStore';
 import {shortenAddress} from '../../../shared/utils/format';
+import {retrieveMnemonic} from '../../wallet/services/mnemonicService';
 
 export default function SettingsScreen() {
   const {isDevnet, toggleNetwork, logout, displayName} = useAuthStore();
@@ -41,9 +42,21 @@ export default function SettingsScreen() {
         {text: 'Cancel', style: 'cancel'},
         {
           text: 'Show Phrase',
-          onPress: () => {
-            // TODO: Navigate to phrase display with FLAG_SECURE
-            Alert.alert('Coming Soon', 'This feature is coming in the next update.');
+          onPress: async () => {
+            try {
+              const mnemonic = await retrieveMnemonic();
+              if (!mnemonic) {
+                Alert.alert('Error', 'No recovery phrase found.');
+                return;
+              }
+              const words = mnemonic.split(' ');
+              const formatted = words
+                .map((w, i) => `${i + 1}. ${w}`)
+                .join('\n');
+              Alert.alert('Recovery Phrase', formatted);
+            } catch {
+              Alert.alert('Error', 'Failed to retrieve recovery phrase.');
+            }
           },
         },
       ],

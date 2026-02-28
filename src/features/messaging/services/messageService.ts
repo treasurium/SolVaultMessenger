@@ -1,22 +1,34 @@
 // src/features/messaging/services/messageService.ts
+// End-to-end encrypted messaging via Solana Memo transactions.
+// Messages are fetched directly from on-chain transaction history.
+
+import {PublicKey} from '@solana/web3.js';
 import {getConnection} from '../../../core/solana/connection';
 import {
   encryptMessage,
-  serializePayload,
   decryptMessage,
+  decryptOwnMessage,
+  extractRecipientFromPayload,
+  getPayloadType,
+  createReadReceipt,
+  decryptReadReceipt,
 } from './encryptionService';
 import {sendEncryptedMemoTransaction} from './memoTransactionService';
-import {getEncryptionKeypair, getWalletKeypair} from '../../wallet/services/keypairService';
-import {lookupUser, relayTxSignature} from '../../../core/api/backendClient';
+import {getWalletKeypair} from '../../wallet/services/keypairService';
 import {
   insertMessage,
   upsertConversation,
+  getMessageByTxSignature,
+  getUnreadMessagesForConversation,
+  updateMessageReadStatus,
+  getReadReceiptSentSignatures,
+  markReadReceiptSent,
   type StoredMessage,
 } from '../../../core/storage/database';
 
 const MEMO_PROGRAM_ID_STR = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
 
-/** High-level: encrypt, send on-chain, relay signature, store locally */
+/** Send an encrypted message on-chain */
 export async function sendMessage(
   recipientAddress: string,
   plaintext: string,
@@ -26,112 +38,255 @@ export async function sendMessage(
     throw new Error('Wallet not initialized');
   }
 
-  const encKeypair = await getEncryptionKeypair();
-  if (!encKeypair) {
-    throw new Error('Encryption keypair not found');
-  }
+  const recipientPubKey = new PublicKey(recipientAddress).toBytes();
 
-  // Look up recipient's encryption public key
-  const recipientUser = await lookupUser(recipientAddress);
-  if (!recipientUser) {
-    throw new Error('Recipient not found in directory');
-  }
-
-  const recipientEncPubKey = new Uint8Array(
-    Buffer.from(recipientUser.encryptionPubKey, 'base64'),
-  );
-
-  // Encrypt
-  const payload = encryptMessage(
+  // Encrypt using Ed25519→X25519 conversion — only nonce+ciphertext on-chain
+  const {serialized, timestamp} = encryptMessage(
     plaintext,
-    encKeypair.secretKey,
-    encKeypair.publicKey,
-    recipientEncPubKey,
+    walletKeypair.secretKey,
+    recipientPubKey,
   );
-  const serialized = serializePayload(payload);
 
-  // Send on-chain
+  // Send on-chain with recipient as account key
   const txSignature = await sendEncryptedMemoTransaction(
     walletKeypair,
     recipientAddress,
     serialized,
   );
 
-  // Relay signature to backend for push notification
-  await relayTxSignature({
-    recipientAddress,
-    txSignature,
-    senderAddress: walletKeypair.publicKey.toString(),
-  });
-
   // Store locally
   const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const conversationId = recipientAddress;
 
   const storedMessage: StoredMessage = {
     id: messageId,
-    conversation_id: conversationId,
+    conversation_id: recipientAddress,
     sender_address: walletKeypair.publicKey.toString(),
     recipient_address: recipientAddress,
     plaintext,
     tx_signature: txSignature,
-    timestamp: payload.timestamp,
+    timestamp,
     status: 'confirmed',
+    read_status: 'sent',
   };
 
   await insertMessage(storedMessage);
 
-  // Update conversation
   await upsertConversation({
-    id: conversationId,
+    id: recipientAddress,
     peer_address: recipientAddress,
-    peer_name: recipientUser.displayName,
-    peer_enc_pubkey: recipientUser.encryptionPubKey,
+    peer_name: null,
+    peer_enc_pubkey: null,
     last_message_text: plaintext,
-    last_message_time: payload.timestamp,
+    last_message_time: timestamp,
   });
 
   return {txSignature, messageId};
 }
 
-/** Fetch a transaction from chain, extract memo, decrypt */
-export async function fetchAndDecryptMessage(
-  txSignature: string,
-  recipientSecretKey: Uint8Array,
-): Promise<{
-  plaintext: string;
-  senderEncPubKey: Uint8Array;
-  timestamp: number;
-  signature: string;
-}> {
+/**
+ * Fetch messages from on-chain transaction history for a conversation.
+ * Scans our own tx history and the peer's for Memo transactions.
+ * The recipient is identified from the embedded pubkey inside the payload.
+ */
+export async function fetchOnChainMessages(
+  peerAddress: string,
+): Promise<void> {
+  const walletKeypair = await getWalletKeypair();
+  if (!walletKeypair) return;
+
   const connection = await getConnection();
+  const myAddress = walletKeypair.publicKey.toString();
+  const myPubKeyBytes = walletKeypair.publicKey.toBytes();
+  const peerPubKey = new PublicKey(peerAddress);
+  const peerPubKeyBytes = peerPubKey.toBytes();
 
-  const txResponse = await connection.getTransaction(txSignature, {
-    commitment: 'confirmed',
-    maxSupportedTransactionVersion: 0,
-  });
+  // Fetch recent tx signatures for both our address and the peer's
+  const [mySignatures, peerSignatures] = await Promise.all([
+    connection.getSignaturesForAddress(walletKeypair.publicKey, {limit: 50}, 'confirmed'),
+    connection.getSignaturesForAddress(peerPubKey, {limit: 50}, 'confirmed'),
+  ]);
 
-  if (!txResponse) {
-    throw new Error(`Transaction not found: ${txSignature}`);
+  // Combine and deduplicate
+  const allSigMap = new Map<string, number>();
+  for (const s of mySignatures) {
+    allSigMap.set(s.signature, s.blockTime ?? 0);
+  }
+  for (const s of peerSignatures) {
+    allSigMap.set(s.signature, s.blockTime ?? 0);
   }
 
-  const memoData = extractMemoFromTransaction(txResponse);
+  for (const [signature, blockTime] of allSigMap) {
+    const existing = await getMessageByTxSignature(signature);
+    if (existing) continue;
 
-  if (!memoData) {
-    throw new Error('No memo data found in transaction');
+    try {
+      const txResponse = await connection.getTransaction(signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      });
+      if (!txResponse) continue;
+
+      const memoData = extractMemoFromTransaction(txResponse);
+      if (!memoData) continue;
+
+      const payloadType = getPayloadType(memoData);
+      const accountKeys = getAccountKeysFromTx(txResponse);
+      const senderAddress = accountKeys[0]; // fee payer = sender
+
+      if (payloadType === 'message') {
+        try {
+          // Extract embedded recipient pubkey from the payload
+          const embeddedRecipient = extractRecipientFromPayload(memoData);
+          const embeddedRecipientAddress = new PublicKey(embeddedRecipient).toString();
+
+          // Case 1: We sent this to the peer
+          if (senderAddress === myAddress && embeddedRecipientAddress === peerAddress) {
+            const plaintext = decryptOwnMessage(
+              memoData,
+              walletKeypair.secretKey,
+              peerPubKeyBytes,
+            );
+
+            await storeDecryptedMessage(
+              signature, blockTime, peerAddress,
+              myAddress, peerAddress, plaintext, true,
+            );
+          }
+          // Case 2: Peer sent this to us
+          else if (senderAddress === peerAddress && embeddedRecipientAddress === myAddress) {
+            const plaintext = decryptMessage(
+              memoData,
+              walletKeypair.secretKey,
+              peerPubKeyBytes,
+            );
+
+            await storeDecryptedMessage(
+              signature, blockTime, peerAddress,
+              peerAddress, myAddress, plaintext, false,
+            );
+          }
+          // else: not relevant to this conversation
+        } catch {
+          continue;
+        }
+      } else if (payloadType === 'read_receipt' && senderAddress === peerAddress) {
+        try {
+          const ackedSignatures = decryptReadReceipt(
+            memoData,
+            walletKeypair.secretKey,
+            peerPubKeyBytes,
+          );
+          for (const ackedSig of ackedSignatures) {
+            await updateMessageReadStatus(ackedSig, 'read');
+          }
+        } catch {
+          // Not a valid read receipt for us
+        }
+      }
+    } catch {
+      continue;
+    }
   }
-
-  const decrypted = decryptMessage(memoData, recipientSecretKey);
-
-  return {
-    ...decrypted,
-    signature: txSignature,
-  };
 }
 
-/** Extract memo data from a parsed Solana transaction */
+/** Helper to store a decrypted message and update conversation */
+async function storeDecryptedMessage(
+  signature: string,
+  blockTime: number,
+  conversationId: string,
+  senderAddress: string,
+  recipientAddress: string,
+  plaintext: string,
+  isMine: boolean,
+): Promise<void> {
+  const messageId = `msg_${blockTime || Date.now()}_${signature.slice(0, 8)}`;
+  const timestamp = (blockTime ?? Math.floor(Date.now() / 1000)) * 1000;
+
+  await insertMessage({
+    id: messageId,
+    conversation_id: conversationId,
+    sender_address: senderAddress,
+    recipient_address: recipientAddress,
+    plaintext,
+    tx_signature: signature,
+    timestamp,
+    status: 'confirmed',
+    read_status: isMine ? 'sent' : 'delivered',
+  });
+
+  await upsertConversation({
+    id: conversationId,
+    peer_address: conversationId,
+    peer_name: null,
+    peer_enc_pubkey: null,
+    last_message_text: plaintext,
+    last_message_time: timestamp,
+    ...(!isMine ? {unread_count: 1} : {}),
+  });
+}
+
+/** Send read receipts for unread messages in a conversation */
+export async function sendReadReceipts(
+  peerAddress: string,
+): Promise<void> {
+  const walletKeypair = await getWalletKeypair();
+  if (!walletKeypair) return;
+
+  // Get unread messages from peer in this conversation
+  const unreadMessages = await getUnreadMessagesForConversation(
+    peerAddress,
+    walletKeypair.publicKey.toString(),
+  );
+
+  if (unreadMessages.length === 0) return;
+
+  // Get signatures we've already sent receipts for
+  const alreadySent = await getReadReceiptSentSignatures(peerAddress);
+  const alreadySentSet = new Set(alreadySent);
+
+  // Filter to only unsent receipts
+  const toAck = unreadMessages
+    .filter(m => m.tx_signature && !alreadySentSet.has(m.tx_signature))
+    .map(m => m.tx_signature!);
+
+  if (toAck.length === 0) return;
+
+  try {
+    const peerPubKey = new PublicKey(peerAddress).toBytes();
+
+    // Create encrypted read receipt
+    const receiptPayload = createReadReceipt(
+      toAck,
+      walletKeypair.secretKey,
+      peerPubKey,
+    );
+
+    // Send on-chain
+    await sendEncryptedMemoTransaction(
+      walletKeypair,
+      peerAddress,
+      receiptPayload,
+    );
+
+    // Mark as sent locally
+    for (const sig of toAck) {
+      await markReadReceiptSent(sig, peerAddress);
+    }
+  } catch (err) {
+    console.warn('Failed to send read receipt:', err);
+  }
+}
+
+// --- Helpers ---
+
+function getAccountKeysFromTx(txResponse: any): string[] {
+  const tx = txResponse.transaction;
+  const message = tx.message;
+  const accountKeys = message.staticAccountKeys ?? message.accountKeys ?? [];
+  return accountKeys.map((k: any) => k.toString());
+}
+
 function extractMemoFromTransaction(txResponse: any): string | null {
-  // Method 1: Parse from instruction data
   const tx = txResponse.transaction;
   const message = tx.message;
   const instructions =
@@ -154,7 +309,7 @@ function extractMemoFromTransaction(txResponse: any): string | null {
     }
   }
 
-  // Method 2: Fallback — parse from logs
+  // Fallback: parse from logs
   const logs = txResponse.meta?.logMessages ?? [];
   for (const log of logs) {
     const memoMatch = log.match(/^Program log: Memo \(len \d+\): (.+)$/);
@@ -164,56 +319,4 @@ function extractMemoFromTransaction(txResponse: any): string | null {
   }
 
   return null;
-}
-
-/** Process incoming message notification: fetch, decrypt, store locally */
-export async function processIncomingMessage(
-  txSignature: string,
-  senderAddress: string,
-): Promise<StoredMessage> {
-  const encKeypair = await getEncryptionKeypair();
-  if (!encKeypair) {
-    throw new Error('Encryption keypair not found');
-  }
-
-  const walletKeypair = await getWalletKeypair();
-  if (!walletKeypair) {
-    throw new Error('Wallet not initialized');
-  }
-
-  const {plaintext, timestamp} = await fetchAndDecryptMessage(
-    txSignature,
-    encKeypair.secretKey,
-  );
-
-  const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const conversationId = senderAddress;
-
-  const storedMessage: StoredMessage = {
-    id: messageId,
-    conversation_id: conversationId,
-    sender_address: senderAddress,
-    recipient_address: walletKeypair.publicKey.toString(),
-    plaintext,
-    tx_signature: txSignature,
-    timestamp,
-    status: 'confirmed',
-  };
-
-  await insertMessage(storedMessage);
-
-  // Look up sender info for conversation
-  const senderUser = await lookupUser(senderAddress);
-
-  await upsertConversation({
-    id: conversationId,
-    peer_address: senderAddress,
-    peer_name: senderUser?.displayName ?? null,
-    peer_enc_pubkey: senderUser?.encryptionPubKey ?? null,
-    last_message_text: plaintext,
-    last_message_time: timestamp,
-    unread_count: 1, // Will be incremented
-  });
-
-  return storedMessage;
 }

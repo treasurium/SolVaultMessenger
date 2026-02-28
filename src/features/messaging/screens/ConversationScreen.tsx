@@ -28,6 +28,9 @@ import type {StoredMessage} from '../../../core/storage/database';
 
 type Props = NativeStackScreenProps<ChatStackParamList, 'Conversation'>;
 
+// Fallback polling interval (WebSocket is primary)
+const FALLBACK_POLL_INTERVAL = 20_000; // 20 seconds
+
 export default function ConversationScreen({navigation, route}: Props) {
   const {peerAddress, peerName} = route.params;
   const {
@@ -37,7 +40,9 @@ export default function ConversationScreen({navigation, route}: Props) {
     loadMessages,
     sendMessage,
     markRead,
-    checkForNewMessages,
+    fetchNewMessages,
+    subscribeToChat,
+    unsubscribeFromChat,
   } = useChatStore();
   const {publicKey} = useWalletStore();
   const {isDevnet} = useAuthStore();
@@ -45,17 +50,29 @@ export default function ConversationScreen({navigation, route}: Props) {
   const [messageText, setMessageText] = useState('');
   const flatListRef = useRef<FlatList>(null);
 
+  // Initial load + WebSocket subscription
   useEffect(() => {
     loadMessages(peerAddress);
     markRead(peerAddress);
-  }, [peerAddress]);
+    // Fetch from chain on first open
+    fetchNewMessages(peerAddress);
 
-  // Poll for new messages in this conversation
+    // Subscribe to real-time updates via WebSocket
+    if (publicKey) {
+      subscribeToChat(publicKey, peerAddress);
+    }
+
+    // Cleanup: unsubscribe when leaving the screen
+    return () => {
+      unsubscribeFromChat();
+    };
+  }, [peerAddress, publicKey]);
+
+  // Fallback poll every 20s (in case WebSocket misses something)
   useEffect(() => {
     const interval = setInterval(() => {
-      checkForNewMessages();
-      loadMessages(peerAddress);
-    }, 8_000);
+      fetchNewMessages(peerAddress);
+    }, FALLBACK_POLL_INTERVAL);
     return () => clearInterval(interval);
   }, [peerAddress]);
 
@@ -90,15 +107,36 @@ export default function ConversationScreen({navigation, route}: Props) {
     Linking.openURL(url);
   };
 
+  /** Render read receipt checkmarks for sent messages */
+  const renderReadStatus = (message: StoredMessage) => {
+    if (message.status === 'pending') return null;
+    const readStatus = message.read_status ?? 'sent';
+
+    switch (readStatus) {
+      case 'sent':
+        // Single grey check — confirmed on-chain
+        return <Text style={styles.checkGrey}>✓</Text>;
+      case 'delivered':
+        // Double grey check — recipient fetched
+        return <Text style={styles.checkGrey}>✓✓</Text>;
+      case 'read':
+        // Double blue check — read receipt confirmed on-chain
+        return <Text style={styles.checkBlue}>✓✓</Text>;
+      default:
+        return null;
+    }
+  };
+
   const renderMessage = useCallback(
     ({item}: {item: StoredMessage}) => {
-      const isMine = item.sender_address === publicKey;
+      const isMine = item.sender_address === publicKey || item.sender_address === '_self_';
 
       return (
         <View
           style={[
             styles.messageBubble,
             isMine ? styles.myMessage : styles.theirMessage,
+            item.status === 'pending' && styles.pendingBubble,
           ]}>
           <Text
             style={[
@@ -121,11 +159,12 @@ export default function ConversationScreen({navigation, route}: Props) {
               </TouchableOpacity>
             )}
             {item.status === 'pending' && (
-              <Text style={styles.pendingStatus}>Sending...</Text>
+              <View style={styles.pendingRow}>
+                <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
+                <Text style={styles.pendingStatus}>Sending...</Text>
+              </View>
             )}
-            {item.status === 'confirmed' && isMine && (
-              <Text style={styles.confirmedStatus}>✓</Text>
-            )}
+            {item.status === 'confirmed' && isMine && renderReadStatus(item)}
           </View>
         </View>
       );
@@ -160,7 +199,7 @@ export default function ConversationScreen({navigation, route}: Props) {
                   {peerName ?? shortenAddress(peerAddress)}
                 </Text>
                 <Text style={styles.emptySubtext}>
-                  Messages are encrypted on-chain using NaCl box
+                  Messages are E2E encrypted on-chain via NaCl box
                 </Text>
               </View>
             }
@@ -230,6 +269,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A1A2E',
     borderBottomLeftRadius: 4,
   },
+  pendingBubble: {
+    opacity: 0.7,
+  },
   messageText: {
     fontSize: 15,
     lineHeight: 21,
@@ -255,14 +297,24 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textDecorationLine: 'underline',
   },
+  pendingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   pendingStatus: {
     color: 'rgba(255,255,255,0.4)',
     fontSize: 11,
     fontStyle: 'italic',
   },
-  confirmedStatus: {
-    color: 'rgba(255,255,255,0.6)',
+  checkGrey: {
+    color: 'rgba(255,255,255,0.5)',
     fontSize: 12,
+  },
+  checkBlue: {
+    color: '#4FC3F7',
+    fontSize: 12,
+    fontWeight: '700',
   },
   emptyState: {
     flex: 1,

@@ -2,12 +2,10 @@
 
 export const ENV = {
   // Backend URL for user directory, push notifications, tx signature relay
-  BACKEND_URL: __DEV__
-    ? 'http://localhost:3000/api'
-    : 'https://api.solvault.app/api',
+  BACKEND_URL: 'https://web-production-d5496.up.railway.app/api',
 
-  // Default to devnet in development
-  USE_DEVNET: __DEV__,
+  // Set to false for mainnet
+  USE_DEVNET: false,
 
   // Balance polling interval (ms)
   BALANCE_POLL_INTERVAL: 15_000,

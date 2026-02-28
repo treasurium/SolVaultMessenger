@@ -19,7 +19,7 @@ export async function sendEncryptedMemoTransaction(
   serializedPayload: string, // base64-encoded encrypted payload
 ): Promise<string> {
   const connection = await getConnection();
-  const _recipient = new PublicKey(recipientAddress);
+  const recipientPubkey = new PublicKey(recipientAddress);
 
   // Validate payload size
   const payloadBytes = new TextEncoder().encode(serializedPayload);
@@ -32,10 +32,10 @@ export async function sendEncryptedMemoTransaction(
 
   const transaction = new Transaction();
 
-  // Memo instruction with encrypted payload
+  // Memo instruction — only sender as signer (Memo requires all account keys to be signers)
   const memoInstruction = new TransactionInstruction({
     keys: [
-      {pubkey: senderKeypair.publicKey, isSigner: true, isWritable: false},
+      {pubkey: senderKeypair.publicKey, isSigner: true, isWritable: true},
     ],
     programId: MEMO_PROGRAM_ID,
     data: Buffer.from(serializedPayload, 'utf-8'),

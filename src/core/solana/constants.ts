@@ -18,5 +18,8 @@ export const MEMO_MAX_BYTES = 566;
 /** Message version byte */
 export const MESSAGE_VERSION = 0x01;
 
-/** Encrypted payload header overhead: version(1) + senderPK(32) + recipientPK(32) + nonce(24) + MAC(16) + timestamp(8) */
-export const PAYLOAD_OVERHEAD_BYTES = 113;
+/** Read receipt version byte */
+export const READ_RECEIPT_VERSION = 0x02;
+
+/** Encrypted payload header overhead: version(1) + nonce(24) + MAC(16) */
+export const PAYLOAD_OVERHEAD_BYTES = 41;

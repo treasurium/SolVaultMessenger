@@ -2,8 +2,13 @@
 import {create} from 'zustand';
 import {
   sendMessage,
-  processIncomingMessage,
+  fetchOnChainMessages,
+  sendReadReceipts,
 } from '../features/messaging/services/messageService';
+import {
+  subscribeToConversation,
+  unsubscribeAll,
+} from '../features/messaging/services/subscriptionService';
 import {
   getConversations,
   getMessages,
@@ -11,7 +16,6 @@ import {
   type StoredConversation,
   type StoredMessage,
 } from '../core/storage/database';
-import {getPendingSignatures, acknowledgeSigature} from '../core/api/backendClient';
 
 interface ChatState {
   // State
@@ -21,16 +25,19 @@ interface ChatState {
   isSending: boolean;
   isLoadingMessages: boolean;
   isLoadingConversations: boolean;
+  isFetchingOnChain: boolean;
   error: string | null;
 
   // Actions
   loadConversations: () => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
   sendMessage: (recipientAddress: string, plaintext: string) => Promise<void>;
-  checkForNewMessages: () => Promise<void>;
+  fetchNewMessages: (peerAddress: string) => Promise<void>;
   markRead: (conversationId: string) => Promise<void>;
   setCurrentConversation: (id: string | null) => void;
   clearError: () => void;
+  subscribeToChat: (myAddress: string, peerAddress: string) => Promise<void>;
+  unsubscribeFromChat: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -40,6 +47,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isSending: false,
   isLoadingMessages: false,
   isLoadingConversations: false,
+  isFetchingOnChain: false,
   error: null,
 
   loadConversations: async () => {
@@ -56,59 +64,84 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       set({isLoadingMessages: true, currentConversationId: conversationId});
       const messages = await getMessages(conversationId);
-      set({currentMessages: messages, isLoadingMessages: false});
+
+      // Merge with any optimistic messages still pending
+      const current = get().currentMessages;
+      const optimistic = current.filter(
+        m => m.status === 'pending' && !messages.some(db => db.id === m.id),
+      );
+
+      set({
+        currentMessages: [...messages, ...optimistic],
+        isLoadingMessages: false,
+      });
     } catch (err: any) {
       set({isLoadingMessages: false, error: err.message});
     }
   },
 
   sendMessage: async (recipientAddress: string, plaintext: string) => {
-    try {
-      set({isSending: true, error: null});
+    // Optimistic: add a pending message to the UI immediately
+    const optimisticId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const optimisticMessage: StoredMessage = {
+      id: optimisticId,
+      conversation_id: recipientAddress,
+      sender_address: '_self_', // Will be replaced on refresh
+      recipient_address: recipientAddress,
+      plaintext,
+      tx_signature: null,
+      timestamp: Date.now(),
+      status: 'pending',
+      read_status: 'sent',
+    };
 
+    const current = get().currentMessages;
+    set({
+      isSending: true,
+      error: null,
+      currentMessages: [...current, optimisticMessage],
+    });
+
+    try {
       await sendMessage(recipientAddress, plaintext);
 
       set({isSending: false});
 
-      // Refresh messages and conversations
+      // Remove optimistic message and reload confirmed messages
       const {currentConversationId} = get();
       if (currentConversationId) {
         get().loadMessages(currentConversationId);
       }
       get().loadConversations();
     } catch (err: any) {
-      set({isSending: false, error: err.message});
+      // Remove the optimistic message on failure
+      set(state => ({
+        isSending: false,
+        error: err.message,
+        currentMessages: state.currentMessages.filter(m => m.id !== optimisticId),
+      }));
       throw err;
     }
   },
 
-  checkForNewMessages: async () => {
+  fetchNewMessages: async (peerAddress: string) => {
+    const {isFetchingOnChain} = get();
+    if (isFetchingOnChain) return; // Prevent concurrent fetches
+
     try {
-      const pending = await getPendingSignatures();
+      set({isFetchingOnChain: true});
 
-      for (const item of pending) {
-        try {
-          await processIncomingMessage(item.txSignature, item.senderAddress);
-          await acknowledgeSigature(item.txSignature);
-        } catch (err) {
-          console.warn(
-            `Failed to process message ${item.txSignature}:`,
-            err,
-          );
-        }
-      }
+      // Fetch messages from on-chain transaction history
+      await fetchOnChainMessages(peerAddress);
 
-      // Refresh conversations after processing
-      if (pending.length > 0) {
-        get().loadConversations();
+      // Refresh local messages list
+      get().loadMessages(peerAddress);
+      get().loadConversations();
 
-        const {currentConversationId} = get();
-        if (currentConversationId) {
-          get().loadMessages(currentConversationId);
-        }
-      }
+      set({isFetchingOnChain: false});
     } catch (err: any) {
-      console.warn('Failed to check for new messages:', err.message);
+      set({isFetchingOnChain: false});
+      console.warn('Failed to fetch on-chain messages:', err.message);
     }
   },
 
@@ -116,9 +149,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       await markConversationRead(conversationId);
       get().loadConversations();
+
+      // Send read receipts on-chain (fire-and-forget)
+      sendReadReceipts(conversationId).catch(err =>
+        console.warn('Read receipt failed:', err),
+      );
     } catch (err: any) {
       console.warn('Failed to mark conversation read:', err.message);
     }
+  },
+
+  /** Subscribe to WebSocket logs for real-time message detection */
+  subscribeToChat: async (myAddress: string, peerAddress: string) => {
+    await subscribeToConversation(myAddress, peerAddress, () => {
+      // When a new memo tx is detected, fetch and decrypt it
+      get().fetchNewMessages(peerAddress);
+    });
+  },
+
+  /** Unsubscribe from WebSocket logs */
+  unsubscribeFromChat: async () => {
+    await unsubscribeAll();
   },
 
   setCurrentConversation: (id: string | null) => {

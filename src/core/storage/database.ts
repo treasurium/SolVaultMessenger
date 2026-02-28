@@ -44,9 +44,10 @@ export async function getDatabase(): Promise<QuickSQLiteConnection> {
       sender_address TEXT NOT NULL,
       recipient_address TEXT NOT NULL,
       plaintext TEXT NOT NULL,
-      tx_signature TEXT,
+      tx_signature TEXT UNIQUE,
       timestamp INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'confirmed',
+      read_status TEXT NOT NULL DEFAULT 'sent',
       created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
     );
   `);
@@ -55,6 +56,18 @@ export async function getDatabase(): Promise<QuickSQLiteConnection> {
     CREATE INDEX IF NOT EXISTS idx_messages_conversation
     ON messages (conversation_id, timestamp DESC);
   `);
+
+  db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_messages_tx_signature
+    ON messages (tx_signature);
+  `);
+
+  // Add read_status column if migrating from old schema
+  try {
+    db.execute(`ALTER TABLE messages ADD COLUMN read_status TEXT NOT NULL DEFAULT 'sent'`);
+  } catch {
+    // Column already exists
+  }
 
   db.execute(`
     CREATE TABLE IF NOT EXISTS conversations (
@@ -72,6 +85,16 @@ export async function getDatabase(): Promise<QuickSQLiteConnection> {
   db.execute(`
     CREATE INDEX IF NOT EXISTS idx_conversations_last_message
     ON conversations (last_message_time DESC);
+  `);
+
+  // Read receipt tracking: which tx signatures we've already sent receipts for
+  db.execute(`
+    CREATE TABLE IF NOT EXISTS read_receipts_sent (
+      tx_signature TEXT NOT NULL,
+      peer_address TEXT NOT NULL,
+      sent_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+      PRIMARY KEY (tx_signature, peer_address)
+    );
   `);
 
   return db;
@@ -95,13 +118,14 @@ export interface StoredMessage {
   tx_signature: string | null;
   timestamp: number;
   status: 'pending' | 'confirmed' | 'failed';
+  read_status: 'sent' | 'delivered' | 'read';
 }
 
 export async function insertMessage(msg: StoredMessage): Promise<void> {
   const database = await getDatabase();
   database.execute(
-    `INSERT OR REPLACE INTO messages (id, conversation_id, sender_address, recipient_address, plaintext, tx_signature, timestamp, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO messages (id, conversation_id, sender_address, recipient_address, plaintext, tx_signature, timestamp, status, read_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       msg.id,
       msg.conversation_id,
@@ -111,6 +135,7 @@ export async function insertMessage(msg: StoredMessage): Promise<void> {
       msg.tx_signature,
       msg.timestamp,
       msg.status,
+      msg.read_status ?? 'sent',
     ],
   );
 }
@@ -126,6 +151,18 @@ export async function getMessages(
     [conversationId, limit, offset],
   );
   return (result.rows?._array ?? []) as StoredMessage[];
+}
+
+export async function getMessageByTxSignature(
+  txSignature: string,
+): Promise<StoredMessage | null> {
+  const database = await getDatabase();
+  const result = database.execute(
+    'SELECT * FROM messages WHERE tx_signature = ? LIMIT 1',
+    [txSignature],
+  );
+  const rows = result.rows?._array ?? [];
+  return rows.length > 0 ? (rows[0] as StoredMessage) : null;
 }
 
 export async function updateMessageStatus(
@@ -145,6 +182,55 @@ export async function updateMessageStatus(
       id,
     ]);
   }
+}
+
+export async function updateMessageReadStatus(
+  txSignature: string,
+  readStatus: 'sent' | 'delivered' | 'read',
+): Promise<void> {
+  const database = await getDatabase();
+  database.execute(
+    'UPDATE messages SET read_status = ? WHERE tx_signature = ?',
+    [readStatus, txSignature],
+  );
+}
+
+export async function getUnreadMessagesForConversation(
+  conversationId: string,
+  myAddress: string,
+): Promise<StoredMessage[]> {
+  const database = await getDatabase();
+  const result = database.execute(
+    `SELECT * FROM messages
+     WHERE conversation_id = ?
+     AND sender_address != ?
+     AND read_status != 'read'
+     ORDER BY timestamp ASC`,
+    [conversationId, myAddress],
+  );
+  return (result.rows?._array ?? []) as StoredMessage[];
+}
+
+export async function getReadReceiptSentSignatures(
+  peerAddress: string,
+): Promise<string[]> {
+  const database = await getDatabase();
+  const result = database.execute(
+    'SELECT tx_signature FROM read_receipts_sent WHERE peer_address = ?',
+    [peerAddress],
+  );
+  return (result.rows?._array ?? []).map((r: any) => r.tx_signature);
+}
+
+export async function markReadReceiptSent(
+  txSignature: string,
+  peerAddress: string,
+): Promise<void> {
+  const database = await getDatabase();
+  database.execute(
+    'INSERT OR IGNORE INTO read_receipts_sent (tx_signature, peer_address) VALUES (?, ?)',
+    [txSignature, peerAddress],
+  );
 }
 
 // --- Conversation CRUD ---

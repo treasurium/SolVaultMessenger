@@ -29,9 +29,12 @@ export async function getConnection(
 
   for (const rpc of rpcs) {
     try {
-      const conn = new Connection(rpc.endpoint, {commitment});
+      const conn = new Connection(rpc.endpoint, {
+        commitment,
+        wsEndpoint: rpc.wsEndpoint,
+      });
       await conn.getSlot(); // Health check
-      console.log(`[RPC] Connected to ${rpc.label}`);
+      console.log(`[RPC] Connected to ${rpc.label} (ws: ${rpc.wsEndpoint ?? 'auto'})`);
       cachedConnection = conn;
       return conn;
     } catch {
