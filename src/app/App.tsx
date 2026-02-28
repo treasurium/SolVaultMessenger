@@ -5,6 +5,7 @@ import Providers from './providers';
 import AppNavigation from './navigation';
 import {useWalletStore} from '../stores/walletStore';
 import {useAuthStore} from '../stores/authStore';
+import {SolVaultAppIcon} from '../shared/components';
 
 function AppContent() {
   const {isInitialized, isLoading: walletLoading, initialize: initWallet} =
@@ -21,7 +22,8 @@ function AppContent() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#6C63FF" />
+        <SolVaultAppIcon width={90} height={90} />
+        <ActivityIndicator size="large" color="#6C63FF" style={styles.spinner} />
         <Text style={styles.loadingText}>Loading SolVault...</Text>
       </View>
     );
@@ -44,6 +46,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0D0D1A',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  spinner: {
+    marginTop: 24,
   },
   loadingText: {
     color: '#A0A0B8',

@@ -1,97 +1,109 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# SolVault Messenger
 
-# Getting Started
+Non-custodial encrypted messaging with a built-in Solana wallet.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Features
 
-## Step 1: Start Metro
+- **End-to-End Encryption** — Messages are encrypted using NaCl box (X25519 + XSalsa20-Poly1305) via Ed25519-to-X25519 key conversion from your Solana wallet keys. Zero key material on-chain.
+- **On-Chain Messages** — All messages are stored as encrypted Solana Memo transactions. No centralized server stores your messages.
+- **Non-Custodial Wallet** — You own your keys. BIP39 mnemonic generation, BIP44 derivation path (`m/44'/501'/0'/0'`), compatible with Phantom and Solflare.
+- **Send & Receive SOL** — Built-in wallet with balance display, deposit QR code, and SOL transfer.
+- **On-Chain Read Receipts** — Encrypted read receipts are sent as Memo transactions. See sent, delivered, and read status.
+- **Real-Time Delivery** — WebSocket subscriptions via Solana `onLogs` for near-instant message detection, with fallback polling.
+- **Optimistic UI** — Sent messages appear instantly with a "Sending..." indicator while the transaction confirms on-chain.
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## Architecture
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+```
+src/
+  app/              — App entry point, navigation, providers
+  config/           — Environment config, RPC endpoints
+  core/
+    solana/         — Connection management, constants
+    storage/        — SQLite database layer
+  features/
+    auth/           — Onboarding, wallet creation/import, settings
+    messaging/      — Conversation UI, encryption, memo transactions, WebSocket subscriptions
+    wallet/         — Balance, deposit, send SOL, keypair management
+  shared/           — Reusable components, utilities, types
+  stores/           — Zustand state management (auth, wallet, chat)
+```
+
+## Encryption Protocol
+
+1. Sender's Ed25519 secret key is converted to X25519 via SHA-512 hash + clamping
+2. Recipient's Ed25519 public key is converted to X25519 via `u = (1+y)/(1-y) mod p`
+3. NaCl `box` encrypts the message with the X25519 shared secret
+4. Wire format: `[version:1B][recipientPubKey:32B][nonce:24B][ciphertext:varB]`
+5. The encrypted payload is sent as a Solana Memo transaction
+6. Only the sender and recipient can decrypt — all done client-side with pure JS (tweetnacl)
+
+## Tech Stack
+
+- React Native 0.84
+- TypeScript
+- Solana web3.js v1
+- tweetnacl (pure JS NaCl)
+- Zustand (state management)
+- react-native-svg
+- SQLite (local message storage)
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- React Native CLI
+- Android SDK (for Android builds)
+
+### Install
 
 ```sh
-# Using npm
+git clone https://github.com/treasurium/SolVaultMessenger.git
+cd SolVaultMessenger
+npm install
+```
+
+### Run (Development)
+
+```sh
+# Start Metro bundler
 npm start
 
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
+# Build and run on Android
 npm run android
-
-# OR using Yarn
-yarn android
 ```
 
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+### Build APK (Standalone)
 
 ```sh
-bundle install
+# Bundle JS
+npx react-native bundle --platform android --dev false \
+  --entry-file index.js \
+  --bundle-output android/app/src/main/assets/index.android.bundle \
+  --assets-dest android/app/src/main/res/
+
+# Build APK
+cd android && ./gradlew assembleDebug
 ```
 
-Then, and every time you update your native dependencies, run:
+The APK will be at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-```sh
-bundle exec pod install
-```
+## Backend
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+The companion backend is at [treasurium/SolVaultMessenger-backend](https://github.com/treasurium/SolVaultMessenger-backend). It provides:
+- User directory (wallet address registration)
+- Push notification relay
+- JWT authentication with Ed25519 signature verification
 
-```sh
-# Using npm
-npm run ios
+The backend is **not required** for core messaging — messages are fetched directly from Solana on-chain transaction history.
 
-# OR using Yarn
-yarn ios
-```
+## Version History
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+Current version: **1.0.0** (v11)
 
-## Step 3: Modify your app
+## License
 
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+All rights reserved.

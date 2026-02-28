@@ -4,3 +4,4 @@ export {default as ScreenContainer} from './ScreenContainer';
 export {default as Input} from './Input';
 export {default as LoadingOverlay} from './LoadingOverlay';
 export {default as WordChip} from './WordChip';
+export {SolVaultLogo, SolVaultAppIcon} from './SolVaultLogo';

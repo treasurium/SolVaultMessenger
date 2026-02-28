@@ -2,7 +2,7 @@
 import React from 'react';
 import {View, Text, StyleSheet, Image} from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {ScreenContainer, Button} from '../../../shared/components';
+import {ScreenContainer, Button, SolVaultLogo} from '../../../shared/components';
 import type {OnboardingStackParamList} from '../../../shared/types';
 
 type Props = NativeStackScreenProps<OnboardingStackParamList, 'Welcome'>;
@@ -12,9 +12,7 @@ export default function WelcomeScreen({navigation}: Props) {
     <ScreenContainer>
       <View style={styles.content}>
         <View style={styles.hero}>
-          <View style={styles.logoContainer}>
-            <Text style={styles.logoIcon}>🔐</Text>
-          </View>
+          <SolVaultLogo width={130} height={130} />
           <Text style={styles.title}>SolVault</Text>
           <Text style={styles.subtitle}>Messenger</Text>
           <Text style={styles.tagline}>
@@ -65,16 +63,7 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
-    backgroundColor: '#6C63FF',
-    justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 20,
-  },
-  logoIcon: {
-    fontSize: 36,
   },
   title: {
     fontSize: 36,
