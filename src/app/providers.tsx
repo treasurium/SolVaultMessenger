@@ -1,6 +1,12 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/app/providers.tsx
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,6 +23,8 @@ interface ProvidersProps {
 
 export default function Providers({children}: ProvidersProps) {
   return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </SafeAreaProvider>
   );
 }

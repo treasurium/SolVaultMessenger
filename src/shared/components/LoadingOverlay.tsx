@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/shared/components/LoadingOverlay.tsx
 import React from 'react';
 import {View, Text, StyleSheet, ActivityIndicator, Modal} from 'react-native';

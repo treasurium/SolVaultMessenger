@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/shared/types/index.ts
 
 /** Navigation param lists */
@@ -12,28 +17,25 @@ export type OnboardingStackParamList = {
 export type WalletStackParamList = {
   WalletHome: undefined;
   Deposit: undefined;
-  SendSol: {recipientAddress?: string};
+  SendSol: {recipientAddress?: string; token?: import('../core/solana/constants').TokenSymbol};
 };
 
 export type ChatStackParamList = {
   ChatList: undefined;
+  NewMessage: undefined;
   Conversation: {peerAddress: string; peerName?: string};
+};
+
+export type ContactsStackParamList = {
+  ContactsList: undefined;
 };
 
 export type MainTabParamList = {
   WalletTab: undefined;
   ChatTab: undefined;
+  ContactsTab: undefined;
   SettingsTab: undefined;
 };
-
-/** User model from backend */
-export interface User {
-  userId: string;
-  solanaAddress: string;
-  encryptionPubKey: string;
-  displayName: string;
-  registeredAt: string;
-}
 
 /** Message displayed in chat UI */
 export interface ChatMessage {

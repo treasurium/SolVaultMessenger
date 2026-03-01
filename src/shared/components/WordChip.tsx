@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/shared/components/WordChip.tsx
 // Used for mnemonic phrase display and confirmation
 import React from 'react';

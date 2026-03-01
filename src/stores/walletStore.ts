@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/stores/walletStore.ts
 import {create} from 'zustand';
 import {Keypair, PublicKey} from '@solana/web3.js';
@@ -22,6 +27,16 @@ import {
   type TransactionRecord,
   type SendSolResult,
 } from '../features/wallet/services/transactionService';
+import {
+  getTokenBalances,
+  sendSplToken,
+  getMintForToken,
+  type TokenBalance,
+} from '../features/wallet/services/tokenService';
+import {
+  type TokenSymbol,
+  SUPPORTED_TOKENS,
+} from '../core/solana/constants';
 
 interface WalletState {
   // State
@@ -30,18 +45,23 @@ interface WalletState {
   publicKey: string | null;
   balance: number;
   balanceLoading: boolean;
+  tokenBalances: TokenBalance[];
+  totalUsdBalance: number;
+  solPrice: number;
   transactions: TransactionRecord[];
   encryptionPubKeyBase64: string | null;
   error: string | null;
 
   // Actions
   initialize: () => Promise<void>;
-  createWallet: () => Promise<string>; // returns mnemonic
+  createWallet: () => Promise<string>;
   importWallet: (mnemonic: string) => Promise<void>;
   refreshBalance: () => Promise<void>;
   refreshTransactions: () => Promise<void>;
   sendSol: (recipientAddress: string, amount: number) => Promise<SendSolResult>;
+  sendToken: (recipientAddress: string, amount: number, token: TokenSymbol) => Promise<SendSolResult>;
   getKeypair: () => Promise<Keypair | null>;
+  getTokenBalance: (symbol: TokenSymbol) => number;
   clearError: () => void;
 }
 
@@ -51,6 +71,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   publicKey: null,
   balance: 0,
   balanceLoading: false,
+  tokenBalances: [],
+  totalUsdBalance: 0,
+  solPrice: 0,
   transactions: [],
   encryptionPubKeyBase64: null,
   error: null,
@@ -65,10 +88,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         return;
       }
 
-      // Try to load existing keypair
       let keypair = await getWalletKeypair();
       if (!keypair) {
-        // Re-derive from mnemonic
         const mnemonic = await retrieveMnemonic();
         if (mnemonic) {
           keypair = await deriveWalletKeypair(mnemonic);
@@ -81,7 +102,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         return;
       }
 
-      // Ensure encryption keypair exists
       let encKeypair = await getEncryptionKeypair();
       if (!encKeypair) {
         encKeypair = await generateAndStoreEncryptionKeypair();
@@ -96,7 +116,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         encryptionPubKeyBase64: encPubKey,
       });
 
-      // Fetch balance in background
+      // Fetch balances in background
       get().refreshBalance();
     } catch (err: any) {
       set({isLoading: false, error: err.message});
@@ -155,24 +175,33 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   refreshBalance: async () => {
     const {publicKey} = get();
-    if (!publicKey) {
-      return;
-    }
+    if (!publicKey) return;
 
     try {
       set({balanceLoading: true});
-      const balance = await getBalance(new PublicKey(publicKey));
-      set({balance, balanceLoading: false});
+      const allBalances = await getTokenBalances(new PublicKey(publicKey));
+      const solToken = allBalances.tokens.find(t => t.symbol === 'SOL');
+      set({
+        balance: solToken?.balance ?? 0,
+        tokenBalances: allBalances.tokens,
+        totalUsdBalance: allBalances.totalUsd,
+        solPrice: allBalances.solPrice,
+        balanceLoading: false,
+      });
     } catch (err: any) {
-      set({balanceLoading: false, error: err.message});
+      // Fallback to SOL-only balance
+      try {
+        const balance = await getBalance(new PublicKey(publicKey));
+        set({balance, balanceLoading: false});
+      } catch {
+        set({balanceLoading: false, error: err.message});
+      }
     }
   },
 
   refreshTransactions: async () => {
     const {publicKey} = get();
-    if (!publicKey) {
-      return;
-    }
+    if (!publicKey) return;
 
     try {
       const transactions = await getRecentTransactions(
@@ -186,20 +215,40 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   sendSol: async (recipientAddress: string, amount: number) => {
     const keypair = await getWalletKeypair();
-    if (!keypair) {
-      throw new Error('Wallet not initialized');
-    }
+    if (!keypair) throw new Error('Wallet not initialized');
 
     const result = await sendSol(keypair, recipientAddress, amount);
-
-    // Refresh balance after send
     get().refreshBalance();
+    return result;
+  },
 
+  sendToken: async (recipientAddress: string, amount: number, token: TokenSymbol) => {
+    const keypair = await getWalletKeypair();
+    if (!keypair) throw new Error('Wallet not initialized');
+
+    let result: SendSolResult;
+
+    if (token === 'SOL') {
+      result = await sendSol(keypair, recipientAddress, amount);
+    } else {
+      const mint = getMintForToken(token);
+      if (!mint) throw new Error(`Unknown token: ${token}`);
+      const tokenInfo = SUPPORTED_TOKENS.find(t => t.symbol === token);
+      const decimals = tokenInfo?.decimals ?? 6;
+      result = await sendSplToken(keypair, recipientAddress, mint, amount, decimals);
+    }
+
+    get().refreshBalance();
     return result;
   },
 
   getKeypair: async () => {
     return getWalletKeypair();
+  },
+
+  getTokenBalance: (symbol: TokenSymbol) => {
+    const token = get().tokenBalances.find(t => t.symbol === symbol);
+    return token?.balance ?? 0;
   },
 
   clearError: () => set({error: null}),

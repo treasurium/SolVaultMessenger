@@ -1,32 +1,94 @@
 # SolVault Messenger
 
-Non-custodial encrypted messaging with a built-in Solana wallet.
+**Encrypted On-Chain Messaging on Solana**
+
+The world's first fully decentralized messenger. No servers. No accounts. No censorship. Just cryptography.
+
+Built by [Treasurium.ai](https://treasurium.ai) | Sponsored by [BitUnix](https://www.bitunix.com/register?vipCode=TreasuriumAICorp)
+
+---
+
+## What is SolVault?
+
+SolVault Messenger is an open-source, end-to-end encrypted messaging app built entirely on the Solana blockchain. Every message is an on-chain transaction — permanent, immutable, and uncensorable. There are no servers, no databases, and no centralized infrastructure of any kind.
+
+**Your 12-word seed phrase is your identity.** Lose your phone, buy a new one, enter your 12 words, and every message you've ever sent or received is recovered from the blockchain. No backup needed. No cloud required.
+
+## Why SolVault?
+
+| Feature | SolVault | Signal | Telegram | WhatsApp | XMTP |
+|---------|----------|--------|----------|----------|------|
+| End-to-end encrypted | Yes | Yes | No | Yes | Yes |
+| No central server | Yes | No | No | No | No |
+| Messages on-chain | Yes | No | No | No | No |
+| 12-word recovery | Yes | No | No | No | No |
+| In-chat payments | Yes | No | No | No | No |
+| No phone/email required | Yes | No | No | No | Yes |
+| Censorship resistant | Yes | No | No | No | Partial |
+| Fully open source | Yes | Yes | No | No | Yes |
 
 ## Features
 
-- **End-to-End Encryption** — Messages are encrypted using NaCl box (X25519 + XSalsa20-Poly1305) via Ed25519-to-X25519 key conversion from your Solana wallet keys. Zero key material on-chain.
-- **On-Chain Messages** — All messages are stored as encrypted Solana Memo transactions. No centralized server stores your messages.
-- **Non-Custodial Wallet** — You own your keys. BIP39 mnemonic generation, BIP44 derivation path (`m/44'/501'/0'/0'`), compatible with Phantom and Solflare.
-- **Send & Receive SOL** — Built-in wallet with balance display, deposit QR code, and SOL transfer.
-- **On-Chain Read Receipts** — Encrypted read receipts are sent as Memo transactions. See sent, delivered, and read status.
-- **Real-Time Delivery** — WebSocket subscriptions via Solana `onLogs` for near-instant message detection, with fallback polling.
-- **Optimistic UI** — Sent messages appear instantly with a "Sending..." indicator while the transaction confirms on-chain.
+### Encrypted Messaging
+- NaCl box encryption (X25519 + XSalsa20 + Poly1305)
+- Messages stored as Solana Memo transactions — permanent and tamper-proof
+- Read receipts (sent, delivered, read) — encrypted on-chain
+- Real-time WebSocket delivery (1-3 seconds)
+- Auto-reconnect with exponential backoff and polling fallback
+
+### Multi-Token Wallet
+- SOL, USDC, and USDT support
+- Real-time USD portfolio value via Jupiter API
+- QR code deposit, address validation, fee estimation
+- Full on-chain transaction history
+
+### In-Chat Payments
+- Send SOL, USDC, or USDT directly in any conversation
+- Encrypted payment details on-chain
+- Styled payment bubbles with token logos and Solana Explorer links
+
+### Security
+- Self-custodial — private keys never leave your device
+- 12-word BIP39 recovery (compatible with Phantom, Solflare, etc.)
+- Hardware-backed secure storage (Android Keystore / iOS Secure Enclave)
+- Biometric lock with auto-lock on background
+- SQLCipher encrypted local database (AES-256)
+- No accounts, no registration, no phone number, no email
+- Zero backend infrastructure — fully peer-to-peer via Solana
+
+### Censorship Resistance
+- Zero centralized servers or infrastructure
+- Multi-RPC fallback — automatically rotates between Solana endpoints
+- User-configurable custom RPC endpoint in Settings
+- Only way to stop SolVault is to shut down the entire Solana blockchain
 
 ## Architecture
 
 ```
+[Device A] → (encrypted memo tx) → [Solana Blockchain] → (WebSocket) → [Device B]
+     ↓                                      ↑
+  Local encrypted                     Thousands of
+  storage only                      decentralized nodes
+                                     (uncensorable)
+```
+
+No backend. No static IP. No single point of failure.
+
+```
 src/
   app/              — App entry point, navigation, providers
-  config/           — Environment config, RPC endpoints
+  config/           — RPC endpoints, custom RPC storage
   core/
     solana/         — Connection management, constants
-    storage/        — SQLite database layer
+    crypto/         — NaCl encryption primitives
+    storage/        — SQLCipher database, secure storage
   features/
-    auth/           — Onboarding, wallet creation/import, settings
-    messaging/      — Conversation UI, encryption, memo transactions, WebSocket subscriptions
-    wallet/         — Balance, deposit, send SOL, keypair management
+    auth/           — Onboarding, settings, biometric lock
+    contacts/       — Contact management (local-only)
+    messaging/      — Conversations, encryption, memo transactions, WebSocket
+    wallet/         — Multi-token balances, send/receive, transaction history
   shared/           — Reusable components, utilities, types
-  stores/           — Zustand state management (auth, wallet, chat)
+  stores/           — Zustand state management (auth, wallet, chat, contacts)
 ```
 
 ## Encryption Protocol
@@ -38,72 +100,81 @@ src/
 5. The encrypted payload is sent as a Solana Memo transaction
 6. Only the sender and recipient can decrypt — all done client-side with pure JS (tweetnacl)
 
-## Tech Stack
-
-- React Native 0.84
-- TypeScript
-- Solana web3.js v1
-- tweetnacl (pure JS NaCl)
-- Zustand (state management)
-- react-native-svg
-- SQLite (local message storage)
-
-## Getting Started
+## Building from Source
 
 ### Prerequisites
-
 - Node.js 18+
 - React Native CLI
-- Android SDK (for Android builds)
+- Android Studio (for Android) / Xcode (for iOS)
+- A Solana RPC endpoint (public endpoints work, or use your own)
 
-### Install
-
-```sh
-git clone https://github.com/treasurium/SolVaultMessenger.git
+### Setup
+```bash
+git clone https://github.com/AiCreat0r/SolVaultMessenger.git
 cd SolVaultMessenger
 npm install
+cd ios && pod install && cd ..  # iOS only
 ```
 
-### Run (Development)
+### Run
+```bash
+# Android
+npx react-native run-android
 
-```sh
-# Start Metro bundler
-npm start
-
-# Build and run on Android
-npm run android
+# iOS
+npx react-native run-ios
 ```
 
-### Build APK (Standalone)
-
-```sh
-# Bundle JS
-npx react-native bundle --platform android --dev false \
-  --entry-file index.js \
-  --bundle-output android/app/src/main/assets/index.android.bundle \
-  --assets-dest android/app/src/main/res/
-
-# Build APK
-cd android && ./gradlew assembleDebug
+### Build APK (Android)
+```bash
+cd android
+./gradlew assembleRelease
 ```
 
-The APK will be at `android/app/build/outputs/apk/debug/app-debug.apk`.
+The APK will be at `android/app/build/outputs/apk/release/app-release.apk`
 
-## Backend
+## Configuration
 
-The companion backend is at [treasurium/SolVaultMessenger-backend](https://github.com/treasurium/SolVaultMessenger-backend). It provides:
-- User directory (wallet address registration)
-- Push notification relay
-- JWT authentication with Ed25519 signature verification
+Copy `.env.example` to `.env` and configure:
+```bash
+cp .env.example .env
+```
 
-The backend is **not required** for core messaging — messages are fetched directly from Solana on-chain transaction history.
+Available settings:
+- `SOLANA_NETWORK` — `mainnet-beta` or `devnet`
+- `CUSTOM_RPC_URL` — your own Solana RPC endpoint (optional)
 
-## Version History
+All other configuration is done within the app's Settings screen.
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
+## Tech Stack
 
-Current version: **1.0.0** (v11)
+- React Native 0.84 + TypeScript
+- Solana web3.js v1 + @solana/spl-token
+- tweetnacl (pure JS NaCl encryption)
+- Zustand (state management)
+- SQLCipher (encrypted local database)
+- react-native-keychain (hardware-backed secure storage)
+- react-native-svg, react-native-safe-area-context
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting pull requests.
+
+### Security Vulnerabilities
+If you discover a security vulnerability, please report it responsibly by emailing contact@treasurium.ai. Do NOT open a public issue for security vulnerabilities. See [SECURITY.md](SECURITY.md) for details.
 
 ## License
 
-All rights reserved.
+SolVault Messenger is licensed under the [GNU General Public License v3.0](LICENSE).
+
+This means you can freely use, study, share, and modify this software. If you distribute a modified version, you must also make your source code available under the same license. This ensures that all forks of SolVault remain open and auditable — preventing anyone from hiding backdoors in a closed-source derivative.
+
+## Disclaimer
+
+SolVault Messenger is open-source cryptographic software provided as-is. The developers do not operate any servers, store any data, or have access to any user messages or private keys. This software is a tool for private communication. The developers are not responsible for how it is used. Use responsibly and in compliance with your local laws.
+
+See [DISCLAIMER](DISCLAIMER) for full legal notice.
+
+---
+
+**SolVault Messenger** — Your messages. Your keys. Your freedom.

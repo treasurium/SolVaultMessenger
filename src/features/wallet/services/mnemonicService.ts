@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/features/wallet/services/mnemonicService.ts
 import * as bip39 from 'bip39';
 import {

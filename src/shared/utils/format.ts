@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/shared/utils/format.ts
 
 /** Truncate a Solana address for display: "7xKX...AsU" */
@@ -57,6 +62,25 @@ export function formatRelativeTime(timestamp: number): string {
 export function formatTime(timestamp: number): string {
   const date = new Date(timestamp);
   return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+
+/** Format USD value with commas */
+export function formatUsd(amount: number): string {
+  return (
+    '$' +
+    amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  );
+}
+
+/** Format token amount with appropriate decimals */
+export function formatTokenAmount(
+  amount: number,
+  symbol: 'SOL' | 'USDC' | 'USDT',
+): string {
+  if (symbol === 'SOL') {
+    return formatSol(amount);
+  }
+  return amount.toFixed(2);
 }
 
 /** Get Solana Explorer URL for a transaction */

@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/shared/components/SolVaultLogo.tsx
 import React from 'react';
 import {SvgXml} from 'react-native-svg';
@@ -98,6 +103,19 @@ const appIconXml = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512
   <line x1="216" y1="422" x2="296" y2="422" stroke="url(#s)" stroke-width="3" stroke-linecap="round" opacity="0.1"/>
 </svg>`;
 
+const wordmarkXml = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 120" width="800" height="120">
+  <defs>
+    <linearGradient id="wg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#9945FF"/>
+      <stop offset="40%" style="stop-color:#14F195"/>
+      <stop offset="100%" style="stop-color:#00C2FF"/>
+    </linearGradient>
+  </defs>
+  <text x="400" y="52" font-family="System, -apple-system, sans-serif" font-weight="800" font-size="52" fill="url(#wg)" text-anchor="middle" letter-spacing="-1">Sol<tspan fill="#ffffff">Vault</tspan></text>
+  <text x="400" y="85" font-family="System, -apple-system, sans-serif" font-weight="300" font-size="20" fill="#ffffff" opacity="0.45" text-anchor="middle" letter-spacing="6">MESSENGER</text>
+  <text x="400" y="110" font-family="System, -apple-system, sans-serif" font-weight="400" font-size="10" fill="#14F195" opacity="0.5" text-anchor="middle" letter-spacing="2.5">ENCRYPTED ON-CHAIN MESSAGING</text>
+</svg>`;
+
 interface LogoProps {
   width?: number;
   height?: number;
@@ -109,4 +127,8 @@ export function SolVaultLogo({width = 120, height = 120}: LogoProps) {
 
 export function SolVaultAppIcon({width = 80, height = 80}: LogoProps) {
   return <SvgXml xml={appIconXml} width={width} height={height} />;
+}
+
+export function SolVaultWordmark({width = 200, height = 30}: LogoProps) {
+  return <SvgXml xml={wordmarkXml} width={width} height={height} />;
 }

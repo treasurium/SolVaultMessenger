@@ -66,6 +66,19 @@ yarn-error.log
 # Env files (never commit secrets)
 .env
 .env.*
+!.env.example
+
+# APK/AAB build outputs
+*.apk
+*.aab
+
+# Metro-generated Android assets (rebuilt on each build)
+android/app/src/main/assets/index.android.bundle
+android/app/src/main/res/drawable-mdpi/
+android/app/src/main/res/drawable-xhdpi/
+android/app/src/main/res/drawable-xxhdpi/
+android/app/src/main/res/drawable-xxxhdpi/
+android/app/src/main/res/raw/
 
 # testing
 /coverage

@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/features/messaging/services/messageService.ts
 // End-to-end encrypted messaging via Solana Memo transactions.
 // Messages are fetched directly from on-chain transaction history.
@@ -57,6 +62,13 @@ export async function sendMessage(
   // Store locally
   const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+  // Detect payment messages
+  let messageType: 'text' | 'payment' = 'text';
+  try {
+    const parsed = JSON.parse(plaintext);
+    if (parsed.type === 'payment') messageType = 'payment';
+  } catch { /* text message */ }
+
   const storedMessage: StoredMessage = {
     id: messageId,
     conversation_id: recipientAddress,
@@ -67,6 +79,7 @@ export async function sendMessage(
     timestamp,
     status: 'confirmed',
     read_status: 'sent',
+    message_type: messageType,
   };
 
   await insertMessage(storedMessage);
@@ -202,6 +215,13 @@ async function storeDecryptedMessage(
   const messageId = `msg_${blockTime || Date.now()}_${signature.slice(0, 8)}`;
   const timestamp = (blockTime ?? Math.floor(Date.now() / 1000)) * 1000;
 
+  // Detect payment messages
+  let messageType: 'text' | 'payment' = 'text';
+  try {
+    const parsed = JSON.parse(plaintext);
+    if (parsed.type === 'payment') messageType = 'payment';
+  } catch { /* text message */ }
+
   await insertMessage({
     id: messageId,
     conversation_id: conversationId,
@@ -212,6 +232,7 @@ async function storeDecryptedMessage(
     timestamp,
     status: 'confirmed',
     read_status: isMine ? 'sent' : 'delivered',
+    message_type: messageType,
   });
 
   await upsertConversation({

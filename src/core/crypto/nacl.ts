@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/core/crypto/nacl.ts
 // Thin wrappers around tweetnacl for NaCl box (X25519 + XSalsa20-Poly1305)
 

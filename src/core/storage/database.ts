@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/core/storage/database.ts
 // Encrypted local SQLite database for chat history using SQLCipher
 
@@ -69,6 +74,13 @@ export async function getDatabase(): Promise<QuickSQLiteConnection> {
     // Column already exists
   }
 
+  // Add message_type column for payment messages
+  try {
+    db.execute(`ALTER TABLE messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'text'`);
+  } catch {
+    // Column already exists
+  }
+
   db.execute(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
@@ -97,6 +109,15 @@ export async function getDatabase(): Promise<QuickSQLiteConnection> {
     );
   `);
 
+  // Contacts table
+  db.execute(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      wallet_address TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      added_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+    );
+  `);
+
   return db;
 }
 
@@ -119,13 +140,14 @@ export interface StoredMessage {
   timestamp: number;
   status: 'pending' | 'confirmed' | 'failed';
   read_status: 'sent' | 'delivered' | 'read';
+  message_type: 'text' | 'payment';
 }
 
 export async function insertMessage(msg: StoredMessage): Promise<void> {
   const database = await getDatabase();
   database.execute(
-    `INSERT OR IGNORE INTO messages (id, conversation_id, sender_address, recipient_address, plaintext, tx_signature, timestamp, status, read_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO messages (id, conversation_id, sender_address, recipient_address, plaintext, tx_signature, timestamp, status, read_status, message_type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       msg.id,
       msg.conversation_id,
@@ -136,6 +158,7 @@ export async function insertMessage(msg: StoredMessage): Promise<void> {
       msg.timestamp,
       msg.status,
       msg.read_status ?? 'sent',
+      msg.message_type ?? 'text',
     ],
   );
 }
@@ -283,4 +306,61 @@ export async function markConversationRead(id: string): Promise<void> {
   database.execute('UPDATE conversations SET unread_count = 0 WHERE id = ?', [
     id,
   ]);
+}
+
+// --- Contact CRUD ---
+
+export interface StoredContact {
+  wallet_address: string;
+  display_name: string;
+  added_at: number;
+}
+
+export async function upsertContact(
+  walletAddress: string,
+  displayName: string,
+): Promise<void> {
+  const database = await getDatabase();
+  database.execute(
+    `INSERT INTO contacts (wallet_address, display_name, added_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(wallet_address) DO UPDATE SET display_name = excluded.display_name`,
+    [walletAddress, displayName, Date.now()],
+  );
+}
+
+export async function deleteContact(walletAddress: string): Promise<void> {
+  const database = await getDatabase();
+  database.execute('DELETE FROM contacts WHERE wallet_address = ?', [
+    walletAddress,
+  ]);
+}
+
+export async function getContacts(): Promise<StoredContact[]> {
+  const database = await getDatabase();
+  const result = database.execute(
+    'SELECT * FROM contacts ORDER BY display_name ASC',
+  );
+  return (result.rows?._array ?? []) as StoredContact[];
+}
+
+export async function getContactByAddress(
+  walletAddress: string,
+): Promise<StoredContact | null> {
+  const database = await getDatabase();
+  const result = database.execute(
+    'SELECT * FROM contacts WHERE wallet_address = ? LIMIT 1',
+    [walletAddress],
+  );
+  const rows = result.rows?._array ?? [];
+  return rows.length > 0 ? (rows[0] as StoredContact) : null;
+}
+
+export async function getAllContactsMap(): Promise<Map<string, string>> {
+  const contacts = await getContacts();
+  const map = new Map<string, string>();
+  for (const c of contacts) {
+    map.set(c.wallet_address, c.display_name);
+  }
+  return map;
 }

@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/features/wallet/services/keypairService.ts
 import {Keypair} from '@solana/web3.js';
 import {derivePath} from 'ed25519-hd-key';

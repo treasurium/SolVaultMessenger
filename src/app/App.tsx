@@ -1,32 +1,125 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/app/App.tsx
-import React, {useEffect, useState} from 'react';
-import {View, Text, StyleSheet, ActivityIndicator} from 'react-native';
+import React, {useEffect, useRef, useState} from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  AppState,
+  TouchableOpacity,
+} from 'react-native';
 import Providers from './providers';
 import AppNavigation from './navigation';
 import {useWalletStore} from '../stores/walletStore';
 import {useAuthStore} from '../stores/authStore';
 import {SolVaultAppIcon} from '../shared/components';
+import {
+  isBiometricEnabled,
+  authenticateWithBiometric,
+} from '../features/auth/services/biometricService';
+
+function LockScreen({onUnlock}: {onUnlock: () => void}) {
+  // Auto-trigger biometric prompt when lock screen appears
+  useEffect(() => {
+    (async () => {
+      const authenticated = await authenticateWithBiometric('Unlock SolVault');
+      if (authenticated) {
+        onUnlock();
+      }
+    })();
+  }, []);
+
+  const handleUnlock = async () => {
+    const authenticated = await authenticateWithBiometric('Unlock SolVault');
+    if (authenticated) {
+      onUnlock();
+    }
+  };
+
+  return (
+    <View style={styles.lockContainer}>
+      <SolVaultAppIcon width={90} height={90} />
+      <Text style={styles.lockTitle}>SolVault Locked</Text>
+      <TouchableOpacity style={styles.unlockButton} onPress={handleUnlock}>
+        <Text style={styles.unlockText}>Tap to Unlock</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 function AppContent() {
   const {isInitialized, isLoading: walletLoading, initialize: initWallet} =
     useWalletStore();
   const {initialize: initAuth, isLoading: authLoading} = useAuthStore();
 
+  const [isLocked, setIsLocked] = useState(false);
+  const [biometricChecked, setBiometricChecked] = useState(false);
+  const appState = useRef(AppState.currentState);
+
   useEffect(() => {
     initAuth();
     initWallet();
   }, []);
 
-  const isLoading = walletLoading || authLoading;
+  // Check biometric on initial app launch
+  useEffect(() => {
+    (async () => {
+      try {
+        const enabled = await isBiometricEnabled();
+        if (enabled) {
+          setIsLocked(true);
+        }
+      } catch {
+        // Fail open if check errors
+      } finally {
+        setBiometricChecked(true);
+      }
+    })();
+  }, []);
+
+  // Biometric lock when app returns from background
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      async nextState => {
+        if (
+          appState.current.match(/inactive|background/) &&
+          nextState === 'active'
+        ) {
+          const enabled = await isBiometricEnabled();
+          if (enabled) {
+            setIsLocked(true);
+          }
+        }
+        appState.current = nextState;
+      },
+    );
+    return () => subscription.remove();
+  }, []);
+
+  const isLoading = walletLoading || authLoading || !biometricChecked;
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <SolVaultAppIcon width={90} height={90} />
-        <ActivityIndicator size="large" color="#6C63FF" style={styles.spinner} />
+        <ActivityIndicator
+          size="large"
+          color="#6C63FF"
+          style={styles.spinner}
+        />
         <Text style={styles.loadingText}>Loading SolVault...</Text>
       </View>
     );
+  }
+
+  if (isLocked) {
+    return <LockScreen onUnlock={() => setIsLocked(false)} />;
   }
 
   return <AppNavigation hasWallet={isInitialized} />;
@@ -54,5 +147,29 @@ const styles = StyleSheet.create({
     color: '#A0A0B8',
     fontSize: 16,
     marginTop: 16,
+  },
+  lockContainer: {
+    flex: 1,
+    backgroundColor: '#0D0D1A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lockTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 24,
+  },
+  unlockButton: {
+    marginTop: 32,
+    backgroundColor: '#6C63FF',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 14,
+  },
+  unlockText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -1,9 +1,15 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/app/navigation.tsx
 import React from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {Text, View, StyleSheet} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 // Onboarding screens
 import WelcomeScreen from '../features/auth/screens/WelcomeScreen';
@@ -18,6 +24,8 @@ import DepositScreen from '../features/wallet/screens/DepositScreen';
 import SendSolScreen from '../features/wallet/screens/SendSolScreen';
 import ChatListScreen from '../features/messaging/screens/ChatListScreen';
 import ConversationScreen from '../features/messaging/screens/ConversationScreen';
+import NewMessageScreen from '../features/messaging/screens/NewMessageScreen';
+import ContactsScreen from '../features/contacts/screens/ContactsScreen';
 import SettingsScreen from '../features/auth/screens/SettingsScreen';
 
 // Types
@@ -33,16 +41,12 @@ const WalletStackNav = createNativeStackNavigator<WalletStackParamList>();
 const ChatStackNav = createNativeStackNavigator<ChatStackParamList>();
 const MainTab = createBottomTabNavigator<MainTabParamList>();
 
-function TabIcon({label, focused}: {label: string; focused: boolean}) {
-  const icons: Record<string, string> = {
-    Wallet: '💎',
-    Chat: '💬',
-    Settings: '⚙️',
-  };
-
+function TabIcon({icon, focused}: {icon: string; focused: boolean}) {
   return (
     <View style={styles.tabIcon}>
-      <Text style={styles.tabIconText}>{icons[label] ?? '•'}</Text>
+      <Text style={[styles.tabIconText, focused && styles.tabIconFocused]}>
+        {icon}
+      </Text>
     </View>
   );
 }
@@ -69,29 +73,34 @@ function ChatNavigator() {
         contentStyle: {backgroundColor: '#0D0D1A'},
       }}>
       <ChatStackNav.Screen name="ChatList" component={ChatListScreen} />
+      <ChatStackNav.Screen name="NewMessage" component={NewMessageScreen} />
       <ChatStackNav.Screen name="Conversation" component={ConversationScreen} />
     </ChatStackNav.Navigator>
   );
 }
 
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+
   return (
     <MainTab.Navigator
+      initialRouteName="ChatTab"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
           backgroundColor: '#0D0D1A',
           borderTopColor: '#1A1A2E',
           borderTopWidth: 1,
-          height: 85,
-          paddingBottom: 25,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
           paddingTop: 8,
         },
-        tabBarActiveTintColor: '#6C63FF',
+        tabBarActiveTintColor: '#14F195',
         tabBarInactiveTintColor: '#666680',
         tabBarLabelStyle: {
           fontSize: 11,
-          fontWeight: '500',
+          fontWeight: '600',
+          marginTop: 2,
         },
       }}>
       <MainTab.Screen
@@ -99,9 +108,7 @@ function MainTabs() {
         component={WalletNavigator}
         options={{
           tabBarLabel: 'Wallet',
-          tabBarIcon: ({focused}) => (
-            <TabIcon label="Wallet" focused={focused} />
-          ),
+          tabBarIcon: ({focused}) => <TabIcon icon="💎" focused={focused} />,
         }}
       />
       <MainTab.Screen
@@ -109,9 +116,15 @@ function MainTabs() {
         component={ChatNavigator}
         options={{
           tabBarLabel: 'Chat',
-          tabBarIcon: ({focused}) => (
-            <TabIcon label="Chat" focused={focused} />
-          ),
+          tabBarIcon: ({focused}) => <TabIcon icon="💬" focused={focused} />,
+        }}
+      />
+      <MainTab.Screen
+        name="ContactsTab"
+        component={ContactsScreen}
+        options={{
+          tabBarLabel: 'Contacts',
+          tabBarIcon: ({focused}) => <TabIcon icon="👥" focused={focused} />,
         }}
       />
       <MainTab.Screen
@@ -119,9 +132,7 @@ function MainTabs() {
         component={SettingsScreen}
         options={{
           tabBarLabel: 'Settings',
-          tabBarIcon: ({focused}) => (
-            <TabIcon label="Settings" focused={focused} />
-          ),
+          tabBarIcon: ({focused}) => <TabIcon icon="⚙️" focused={focused} />,
         }}
       />
     </MainTab.Navigator>
@@ -189,6 +200,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tabIconText: {
-    fontSize: 20,
+    fontSize: 24,
+  },
+  tabIconFocused: {
+    transform: [{scale: 1.1}],
   },
 });

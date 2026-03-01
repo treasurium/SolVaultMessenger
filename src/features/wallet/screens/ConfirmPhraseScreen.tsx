@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/features/wallet/screens/ConfirmPhraseScreen.tsx
 import React, {useState, useMemo} from 'react';
 import {View, Text, StyleSheet, ScrollView, Alert} from 'react-native';

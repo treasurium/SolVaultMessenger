@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/features/messaging/screens/ConversationScreen.tsx
 import React, {useEffect, useState, useRef, useCallback} from 'react';
 import {
@@ -12,11 +17,13 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {ScreenContainer} from '../../../shared/components';
 import {useChatStore} from '../../../stores/chatStore';
 import {useWalletStore} from '../../../stores/walletStore';
+import {useContactsStore} from '../../../stores/contactsStore';
 import {
   shortenAddress,
   formatTime,
@@ -25,11 +32,26 @@ import {
 import {useAuthStore} from '../../../stores/authStore';
 import type {ChatStackParamList} from '../../../shared/types';
 import type {StoredMessage} from '../../../core/storage/database';
+import type {TokenSymbol} from '../../../core/solana/constants';
+import PaymentModal from '../components/PaymentModal';
+import PaymentBubble from '../components/PaymentBubble';
 
 type Props = NativeStackScreenProps<ChatStackParamList, 'Conversation'>;
 
-// Fallback polling interval (WebSocket is primary)
-const FALLBACK_POLL_INTERVAL = 20_000; // 20 seconds
+// Polling is now handled internally by subscriptionService (5s fallback after WS failure)
+
+/** Check if a plaintext message is a payment JSON */
+function parsePayment(plaintext: string) {
+  try {
+    const parsed = JSON.parse(plaintext);
+    if (parsed.type === 'payment' && parsed.token && parsed.amount) {
+      return parsed;
+    }
+  } catch {
+    // Not JSON
+  }
+  return null;
+}
 
 export default function ConversationScreen({navigation, route}: Props) {
   const {peerAddress, peerName} = route.params;
@@ -43,53 +65,59 @@ export default function ConversationScreen({navigation, route}: Props) {
     fetchNewMessages,
     subscribeToChat,
     unsubscribeFromChat,
+    reconnectChat,
   } = useChatStore();
-  const {publicKey} = useWalletStore();
+  const {publicKey, sendToken, refreshBalance} = useWalletStore();
+  const {resolveAddress} = useContactsStore();
   const {isDevnet} = useAuthStore();
 
+  const contactName = resolveAddress(peerAddress);
+  const headerTitle = contactName ?? peerName ?? shortenAddress(peerAddress);
+
   const [messageText, setMessageText] = useState('');
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
-  // Initial load + WebSocket subscription
   useEffect(() => {
     loadMessages(peerAddress);
     markRead(peerAddress);
-    // Fetch from chain on first open
     fetchNewMessages(peerAddress);
 
-    // Subscribe to real-time updates via WebSocket
     if (publicKey) {
       subscribeToChat(publicKey, peerAddress);
     }
 
-    // Cleanup: unsubscribe when leaving the screen
     return () => {
       unsubscribeFromChat();
     };
   }, [peerAddress, publicKey]);
 
-  // Fallback poll every 20s (in case WebSocket misses something)
+  // Reconnect WebSocket + fetch missed messages when app returns to foreground
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchNewMessages(peerAddress);
-    }, FALLBACK_POLL_INTERVAL);
-    return () => clearInterval(interval);
-  }, [peerAddress]);
+    const appState = AppState.currentState;
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (
+        appState.match(/inactive|background/) &&
+        nextState === 'active'
+      ) {
+        reconnectChat();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     navigation.setOptions({
       headerShown: true,
-      headerTitle: peerName ?? shortenAddress(peerAddress),
+      headerTitle: headerTitle,
       headerStyle: {backgroundColor: '#0D0D1A'},
       headerTintColor: '#FFFFFF',
     });
-  }, [navigation, peerName, peerAddress]);
+  }, [navigation, peerName, peerAddress, headerTitle]);
 
   const handleSend = async () => {
     const text = messageText.trim();
-    if (!text) {
-      return;
-    }
+    if (!text) return;
 
     setMessageText('');
 
@@ -98,8 +126,29 @@ export default function ConversationScreen({navigation, route}: Props) {
       loadMessages(peerAddress);
     } catch (err: any) {
       Alert.alert('Send Failed', err.message);
-      setMessageText(text); // Restore text on failure
+      setMessageText(text);
     }
+  };
+
+  const handlePaymentSend = async (token: TokenSymbol, amount: number) => {
+    // 1. Execute the transfer
+    const result = await sendToken(peerAddress, amount, token);
+
+    // 2. Create payment message JSON
+    const paymentPayload = JSON.stringify({
+      type: 'payment',
+      token,
+      amount: amount.toString(),
+      txSignature: result.signature,
+    });
+
+    // 3. Send as encrypted message
+    await sendMessage(peerAddress, paymentPayload);
+    loadMessages(peerAddress);
+    refreshBalance();
+
+    // 4. Close modal
+    setPaymentModalVisible(false);
   };
 
   const handleTxPress = (signature: string) => {
@@ -107,20 +156,16 @@ export default function ConversationScreen({navigation, route}: Props) {
     Linking.openURL(url);
   };
 
-  /** Render read receipt checkmarks for sent messages */
   const renderReadStatus = (message: StoredMessage) => {
     if (message.status === 'pending') return null;
     const readStatus = message.read_status ?? 'sent';
 
     switch (readStatus) {
       case 'sent':
-        // Single grey check — confirmed on-chain
         return <Text style={styles.checkGrey}>✓</Text>;
       case 'delivered':
-        // Double grey check — recipient fetched
         return <Text style={styles.checkGrey}>✓✓</Text>;
       case 'read':
-        // Double blue check — read receipt confirmed on-chain
         return <Text style={styles.checkBlue}>✓✓</Text>;
       default:
         return null;
@@ -129,7 +174,22 @@ export default function ConversationScreen({navigation, route}: Props) {
 
   const renderMessage = useCallback(
     ({item}: {item: StoredMessage}) => {
-      const isMine = item.sender_address === publicKey || item.sender_address === '_self_';
+      const isMine =
+        item.sender_address === publicKey ||
+        item.sender_address === '_self_';
+
+      // Check if payment message
+      const paymentData = parsePayment(item.plaintext);
+      if (paymentData) {
+        return (
+          <PaymentBubble
+            payment={paymentData}
+            isMine={isMine}
+            timestamp={item.timestamp}
+            isDevnet={isDevnet}
+          />
+        );
+      }
 
       return (
         <View
@@ -160,7 +220,10 @@ export default function ConversationScreen({navigation, route}: Props) {
             )}
             {item.status === 'pending' && (
               <View style={styles.pendingRow}>
-                <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
+                <ActivityIndicator
+                  size="small"
+                  color="rgba(255,255,255,0.5)"
+                />
                 <Text style={styles.pendingStatus}>Sending...</Text>
               </View>
             )}
@@ -172,7 +235,6 @@ export default function ConversationScreen({navigation, route}: Props) {
     [publicKey, isDevnet],
   );
 
-  // Messages are stored newest-first, but we display oldest-first
   const sortedMessages = [...currentMessages].reverse();
 
   return (
@@ -196,7 +258,7 @@ export default function ConversationScreen({navigation, route}: Props) {
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>
                   Start a conversation with{'\n'}
-                  {peerName ?? shortenAddress(peerAddress)}
+                  {headerTitle}
                 </Text>
                 <Text style={styles.emptySubtext}>
                   Messages are E2E encrypted on-chain via NaCl box
@@ -210,6 +272,13 @@ export default function ConversationScreen({navigation, route}: Props) {
         )}
 
         <View style={styles.inputBar}>
+          {/* Payment button */}
+          <TouchableOpacity
+            style={styles.payButton}
+            onPress={() => setPaymentModalVisible(true)}>
+            <Text style={styles.payButtonText}>+</Text>
+          </TouchableOpacity>
+
           <TextInput
             style={styles.textInput}
             placeholder="Type a message..."
@@ -235,6 +304,13 @@ export default function ConversationScreen({navigation, route}: Props) {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      <PaymentModal
+        visible={paymentModalVisible}
+        onClose={() => setPaymentModalVisible(false)}
+        onSend={handlePaymentSend}
+        peerName={headerTitle}
+      />
     </ScreenContainer>
   );
 }
@@ -338,11 +414,25 @@ const styles = StyleSheet.create({
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     backgroundColor: '#0D0D1A',
     borderTopWidth: 1,
     borderTopColor: '#1A1A2E',
+  },
+  payButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#14F195',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+  },
+  payButtonText: {
+    color: '#0D0D1A',
+    fontSize: 22,
+    fontWeight: '700',
   },
   textInput: {
     flex: 1,
@@ -354,7 +444,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     maxHeight: 100,
-    marginRight: 8,
+    marginRight: 6,
   },
   sendButton: {
     width: 40,

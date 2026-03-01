@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/features/messaging/services/encryptionService.ts
 // E2E encryption using Ed25519→X25519 key conversion from Solana wallet keys.
 // Only version + nonce + ciphertext goes on-chain. Zero key material on-chain.

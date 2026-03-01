@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/stores/chatStore.ts
 import {create} from 'zustand';
 import {
@@ -8,6 +13,7 @@ import {
 import {
   subscribeToConversation,
   unsubscribeAll,
+  reconnectIfNeeded,
 } from '../features/messaging/services/subscriptionService';
 import {
   getConversations,
@@ -38,6 +44,7 @@ interface ChatState {
   clearError: () => void;
   subscribeToChat: (myAddress: string, peerAddress: string) => Promise<void>;
   unsubscribeFromChat: () => Promise<void>;
+  reconnectChat: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -93,6 +100,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: Date.now(),
       status: 'pending',
       read_status: 'sent',
+      message_type: 'text',
     };
 
     const current = get().currentMessages;
@@ -170,6 +178,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   /** Unsubscribe from WebSocket logs */
   unsubscribeFromChat: async () => {
     await unsubscribeAll();
+  },
+
+  /** Reconnect WebSocket after app foreground */
+  reconnectChat: async () => {
+    await reconnectIfNeeded();
   },
 
   setCurrentConversation: (id: string | null) => {

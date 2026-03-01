@@ -1,4 +1,12 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/config/rpc.ts
+// Decentralized RPC configuration — multiple fallback endpoints.
+// If one is blocked, the app automatically tries the next.
+// Users can also configure their own private RPC endpoint in Settings.
 
 export interface RPCConfig {
   endpoint: string;
@@ -8,19 +16,17 @@ export interface RPCConfig {
 
 export const MAINNET_RPCS: RPCConfig[] = [
   {
-    endpoint: 'https://mainnet.helius-rpc.com/?api-key=YOUR_KEY',
-    wsEndpoint: 'wss://mainnet.helius-rpc.com/?api-key=YOUR_KEY',
-    label: 'Helius',
-  },
-  {
-    endpoint: 'https://solana-mainnet.g.alchemy.com/v2/YOUR_KEY',
-    wsEndpoint: 'wss://solana-mainnet.g.alchemy.com/v2/YOUR_KEY',
-    label: 'Alchemy',
-  },
-  {
     endpoint: 'https://api.mainnet-beta.solana.com',
     wsEndpoint: 'wss://api.mainnet-beta.solana.com',
-    label: 'Public',
+    label: 'Solana Public',
+  },
+  {
+    endpoint: 'https://rpc.ankr.com/solana',
+    label: 'Ankr',
+  },
+  {
+    endpoint: 'https://solana.public-rpc.com',
+    label: 'Public RPC',
   },
 ];
 

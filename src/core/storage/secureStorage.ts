@@ -1,3 +1,8 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/core/storage/secureStorage.ts
 import * as Keychain from 'react-native-keychain';
 import {Platform} from 'react-native';

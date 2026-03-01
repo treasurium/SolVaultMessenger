@@ -1,5 +1,10 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/features/messaging/screens/ChatListScreen.tsx
-import React, {useEffect, useCallback, useState} from 'react';
+import React, {useEffect, useCallback} from 'react';
 import {
   View,
   Text,
@@ -7,17 +12,15 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {ScreenContainer, Input} from '../../../shared/components';
+import {ScreenContainer, SolVaultWordmark} from '../../../shared/components';
 import {useChatStore} from '../../../stores/chatStore';
-import {useWalletStore} from '../../../stores/walletStore';
+import {useContactsStore} from '../../../stores/contactsStore';
 import {
   shortenAddress,
   formatRelativeTime,
 } from '../../../shared/utils/format';
-import {isValidSolanaAddress} from '../../wallet/services/transactionService';
 import type {ChatStackParamList} from '../../../shared/types';
 import type {StoredConversation} from '../../../core/storage/database';
 
@@ -28,122 +31,91 @@ export default function ChatListScreen({navigation}: Props) {
     conversations,
     isLoadingConversations,
     loadConversations,
-    checkForNewMessages,
   } = useChatStore();
-  const {publicKey} = useWalletStore();
-
-  const [showNewChat, setShowNewChat] = useState(false);
-  const [newChatAddress, setNewChatAddress] = useState('');
+  const {loadContacts, resolveAddress} = useContactsStore();
 
   useEffect(() => {
     loadConversations();
-  }, []);
-
-  // Poll for new messages
-  useEffect(() => {
-    const interval = setInterval(checkForNewMessages, 10_000);
-    return () => clearInterval(interval);
+    loadContacts();
   }, []);
 
   const handleRefresh = useCallback(() => {
     loadConversations();
-    checkForNewMessages();
+    loadContacts();
   }, []);
 
-  const handleNewChat = () => {
-    const address = newChatAddress.trim();
+  const renderConversation = ({item}: {item: StoredConversation}) => {
+    const contactName = resolveAddress(item.peer_address);
+    const displayName = contactName ?? item.peer_name ?? shortenAddress(item.peer_address);
 
-    if (!address) {
-      return;
-    }
-
-    if (!isValidSolanaAddress(address)) {
-      Alert.alert('Invalid Address', 'Please enter a valid Solana address.');
-      return;
-    }
-
-    if (address === publicKey) {
-      Alert.alert('Error', "You can't message yourself.");
-      return;
-    }
-
-    setShowNewChat(false);
-    setNewChatAddress('');
-    navigation.navigate('Conversation', {peerAddress: address});
-  };
-
-  const renderConversation = ({item}: {item: StoredConversation}) => (
-    <TouchableOpacity
-      style={styles.conversationRow}
-      onPress={() =>
-        navigation.navigate('Conversation', {
-          peerAddress: item.peer_address,
-          peerName: item.peer_name ?? undefined,
-        })
+    // Show friendly text for payment messages
+    let previewText = item.last_message_text ?? 'No messages yet';
+    try {
+      const parsed = JSON.parse(previewText);
+      if (parsed.type === 'payment') {
+        previewText = `Sent ${parsed.amount} ${parsed.token}`;
       }
-      activeOpacity={0.7}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>
-          {(item.peer_name ?? item.peer_address).charAt(0).toUpperCase()}
-        </Text>
-      </View>
-      <View style={styles.conversationContent}>
-        <View style={styles.conversationHeader}>
-          <Text style={styles.conversationName} numberOfLines={1}>
-            {item.peer_name ?? shortenAddress(item.peer_address)}
+    } catch {
+      // Not JSON, use as-is
+    }
+
+    return (
+      <TouchableOpacity
+        style={styles.conversationRow}
+        onPress={() =>
+          navigation.navigate('Conversation', {
+            peerAddress: item.peer_address,
+            peerName: contactName ?? item.peer_name ?? undefined,
+          })
+        }
+        activeOpacity={0.7}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>
+            {displayName.charAt(0).toUpperCase()}
           </Text>
-          {item.last_message_time && (
-            <Text style={styles.conversationTime}>
-              {formatRelativeTime(item.last_message_time)}
+        </View>
+        <View style={styles.conversationContent}>
+          <View style={styles.conversationHeader}>
+            <Text style={styles.conversationName} numberOfLines={1}>
+              {displayName}
             </Text>
-          )}
+            {item.last_message_time && (
+              <Text style={styles.conversationTime}>
+                {formatRelativeTime(item.last_message_time)}
+              </Text>
+            )}
+          </View>
+          <View style={styles.conversationFooter}>
+            <Text style={styles.conversationPreview} numberOfLines={1}>
+              {previewText}
+            </Text>
+            {item.unread_count > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>{item.unread_count}</Text>
+              </View>
+            )}
+          </View>
         </View>
-        <View style={styles.conversationFooter}>
-          <Text style={styles.conversationPreview} numberOfLines={1}>
-            {item.last_message_text ?? 'No messages yet'}
-          </Text>
-          {item.unread_count > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadText}>{item.unread_count}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <ScreenContainer padded={false}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Messages</Text>
-        <TouchableOpacity
-          style={styles.newChatButton}
-          onPress={() => setShowNewChat(!showNewChat)}>
-          <Text style={styles.newChatIcon}>{showNewChat ? '✕' : '+'}</Text>
-        </TouchableOpacity>
+      {/* Wordmark Logo */}
+      <View style={styles.logoContainer}>
+        <SolVaultWordmark width={200} height={30} />
       </View>
 
-      {showNewChat && (
-        <View style={styles.newChatContainer}>
-          <Input
-            placeholder="Enter Solana address"
-            value={newChatAddress}
-            onChangeText={setNewChatAddress}
-            autoCapitalize="none"
-            autoCorrect={false}
-            containerStyle={styles.newChatInput}
-          />
-          <TouchableOpacity
-            style={[
-              styles.startChatButton,
-              !newChatAddress.trim() && styles.startChatButtonDisabled,
-            ]}
-            onPress={handleNewChat}
-            disabled={!newChatAddress.trim()}>
-            <Text style={styles.startChatText}>Start Chat</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* New Chat Button */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={styles.newChatButton}
+          onPress={() => navigation.navigate('NewMessage')}>
+          <Text style={styles.newChatIcon}>+</Text>
+          <Text style={styles.newChatLabel}>New Message</Text>
+        </TouchableOpacity>
+      </View>
 
       <FlatList
         data={conversations}
@@ -161,7 +133,7 @@ export default function ChatListScreen({navigation}: Props) {
             <Text style={styles.emptyIcon}>💬</Text>
             <Text style={styles.emptyText}>No conversations yet</Text>
             <Text style={styles.emptySubtext}>
-              Start a new chat by tapping the + button
+              Start a new chat by tapping + New Message
             </Text>
           </View>
         }
@@ -172,53 +144,32 @@ export default function ChatListScreen({navigation}: Props) {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  logoContainer: {
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
   newChatButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#6C63FF',
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#6C63FF',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 6,
   },
   newChatIcon: {
     color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '300',
+    fontSize: 16,
+    fontWeight: '600',
   },
-  newChatContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-  },
-  newChatInput: {
-    flex: 1,
-    marginBottom: 0,
-    marginRight: 8,
-  },
-  startChatButton: {
-    backgroundColor: '#6C63FF',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  startChatButtonDisabled: {
-    opacity: 0.5,
-  },
-  startChatText: {
+  newChatLabel: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
@@ -233,7 +184,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A1A2E',
     borderRadius: 12,
     padding: 14,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   avatar: {
     width: 48,

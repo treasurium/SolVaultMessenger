@@ -1,9 +1,12 @@
+/*
+ * SolVault Messenger - Encrypted On-Chain Messaging on Solana
+ * Copyright (C) 2026 Treasurium.ai
+ * Licensed under GPLv3 - see LICENSE file
+ */
 // src/config/env.ts
+// Fully decentralized — no backend dependency. Only Solana RPC nodes.
 
 export const ENV = {
-  // Backend URL for user directory, push notifications, tx signature relay
-  BACKEND_URL: 'https://web-production-d5496.up.railway.app/api',
-
   // Set to false for mainnet
   USE_DEVNET: false,
 

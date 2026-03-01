@@ -1,0 +1,19 @@
+LEGAL DISCLAIMER
+
+SolVault Messenger is open-source cryptographic software provided as-is.
+The developers do not operate any servers, store any data, or have access
+to any user messages or private keys. This software is a tool for private
+communication. The developers are not responsible for how it is used.
+Use responsibly and in compliance with your local laws.
+
+SolVault Messenger is published as open-source software under the GNU
+General Public License v3 (GPLv3). The developers are publishers of
+cryptographic software, not operators of a communication service. No user
+data passes through any infrastructure controlled by the developers. All
+communication occurs directly on the public Solana blockchain between
+end users.
+
+This legal framework is consistent with established precedent for
+open-source privacy tools including Tor, Signal Protocol, Bitcoin Core,
+and PGP/GPG — all of which are open-source cryptographic tools whose
+developers are not held liable for end-user activity.
