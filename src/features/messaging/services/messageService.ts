@@ -30,8 +30,10 @@ import {
   markReadReceiptSent,
   type StoredMessage,
 } from '../../../core/storage/database';
+import {secureRetrieve, secureStore} from '../../../core/storage/secureStorage';
 
 const MEMO_PROGRAM_ID_STR = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+const LAST_SIGNATURE_KEY = 'solvault_last_processed_sig';
 
 /** Send an encrypted message on-chain */
 export async function sendMessage(
@@ -45,7 +47,7 @@ export async function sendMessage(
 
   const recipientPubKey = new PublicKey(recipientAddress).toBytes();
 
-  // Encrypt using Ed25519→X25519 conversion — only nonce+ciphertext on-chain
+  // Encrypt using Ed25519->X25519 conversion — only nonce+ciphertext on-chain
   const {serialized, timestamp} = encryptMessage(
     plaintext,
     walletKeypair.secretKey,
@@ -97,9 +99,236 @@ export async function sendMessage(
 }
 
 /**
- * Fetch messages from on-chain transaction history for a conversation.
- * Scans our own tx history and the peer's for Memo transactions.
- * The recipient is identified from the embedded pubkey inside the payload.
+ * Process a single transaction by signature.
+ * Called by the global WebSocket listener when a new memo tx is detected.
+ * Returns the peer address if a message was successfully processed (for UI refresh).
+ */
+export async function processTransaction(
+  signature: string,
+): Promise<string | null> {
+  if (!signature) return null;
+
+  const walletKeypair = await getWalletKeypair();
+  if (!walletKeypair) return null;
+
+  // Skip if already processed
+  const existing = await getMessageByTxSignature(signature);
+  if (existing) return null;
+
+  const connection = await getConnection();
+  const myAddress = walletKeypair.publicKey.toString();
+  const myPubKeyBytes = walletKeypair.publicKey.toBytes();
+
+  try {
+    const txResponse = await connection.getTransaction(signature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0,
+    });
+    if (!txResponse) return null;
+
+    const memoData = extractMemoFromTransaction(txResponse);
+    if (!memoData) return null;
+
+    const payloadType = getPayloadType(memoData);
+    const accountKeys = getAccountKeysFromTx(txResponse);
+    const senderAddress = accountKeys[0]; // fee payer = sender
+    const blockTime = txResponse.blockTime ?? 0;
+
+    if (payloadType === 'message') {
+      try {
+        const embeddedRecipient = extractRecipientFromPayload(memoData);
+        const embeddedRecipientAddress = new PublicKey(embeddedRecipient).toString();
+
+        // Case 1: Someone sent a message TO us
+        if (embeddedRecipientAddress === myAddress && senderAddress !== myAddress) {
+          const senderPubKeyBytes = new PublicKey(senderAddress).toBytes();
+          const plaintext = decryptMessage(
+            memoData,
+            walletKeypair.secretKey,
+            senderPubKeyBytes,
+          );
+
+          await storeDecryptedMessage(
+            signature, blockTime, senderAddress,
+            senderAddress, myAddress, plaintext, false,
+          );
+
+          // Save as last processed signature
+          await saveLastProcessedSignature(signature);
+
+          return senderAddress; // peer address for UI refresh
+        }
+
+        // Case 2: We sent a message (e.g. from another device or just confirmed)
+        if (senderAddress === myAddress && embeddedRecipientAddress !== myAddress) {
+          const recipientPubKeyBytes = new PublicKey(embeddedRecipientAddress).toBytes();
+          const plaintext = decryptOwnMessage(
+            memoData,
+            walletKeypair.secretKey,
+            recipientPubKeyBytes,
+          );
+
+          await storeDecryptedMessage(
+            signature, blockTime, embeddedRecipientAddress,
+            myAddress, embeddedRecipientAddress, plaintext, true,
+          );
+
+          await saveLastProcessedSignature(signature);
+
+          return embeddedRecipientAddress;
+        }
+      } catch {
+        return null;
+      }
+    } else if (payloadType === 'read_receipt' && senderAddress !== myAddress) {
+      try {
+        const senderPubKeyBytes = new PublicKey(senderAddress).toBytes();
+        const ackedSignatures = decryptReadReceipt(
+          memoData,
+          walletKeypair.secretKey,
+          senderPubKeyBytes,
+        );
+        for (const ackedSig of ackedSignatures) {
+          await updateMessageReadStatus(ackedSig, 'read');
+        }
+        await saveLastProcessedSignature(signature);
+        return senderAddress;
+      } catch {
+        // Not a valid read receipt for us
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * Fetch and process all new messages across ALL conversations.
+ * Scans the user's own transaction history for new memo transactions.
+ * This is the catch-up scan used on app launch and when returning from background.
+ */
+export async function fetchAllNewMessages(): Promise<string[]> {
+  const walletKeypair = await getWalletKeypair();
+  if (!walletKeypair) return [];
+
+  const connection = await getConnection();
+  const myAddress = walletKeypair.publicKey.toString();
+  const myPubKeyBytes = walletKeypair.publicKey.toBytes();
+
+  // Get the last processed signature to only fetch newer transactions
+  const lastProcessedSig = await loadLastProcessedSignature();
+
+  let signatures;
+  try {
+    signatures = await connection.getSignaturesForAddress(
+      walletKeypair.publicKey,
+      {
+        limit: 100,
+        ...(lastProcessedSig ? {until: lastProcessedSig} : {}),
+      },
+      'confirmed',
+    );
+  } catch (err) {
+    console.warn('[Messages] Failed to fetch signatures:', err);
+    return [];
+  }
+
+  if (signatures.length === 0) return [];
+
+  // Process oldest first
+  const affectedPeers: Set<string> = new Set();
+
+  for (const sigInfo of [...signatures].reverse()) {
+    const existing = await getMessageByTxSignature(sigInfo.signature);
+    if (existing) continue;
+
+    try {
+      const txResponse = await connection.getTransaction(sigInfo.signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      });
+      if (!txResponse) continue;
+
+      const memoData = extractMemoFromTransaction(txResponse);
+      if (!memoData) continue;
+
+      const payloadType = getPayloadType(memoData);
+      const accountKeys = getAccountKeysFromTx(txResponse);
+      const senderAddress = accountKeys[0];
+      const blockTime = txResponse.blockTime ?? 0;
+
+      if (payloadType === 'message') {
+        try {
+          const embeddedRecipient = extractRecipientFromPayload(memoData);
+          const embeddedRecipientAddress = new PublicKey(embeddedRecipient).toString();
+
+          // Incoming message to us
+          if (embeddedRecipientAddress === myAddress && senderAddress !== myAddress) {
+            const senderPubKeyBytes = new PublicKey(senderAddress).toBytes();
+            const plaintext = decryptMessage(
+              memoData,
+              walletKeypair.secretKey,
+              senderPubKeyBytes,
+            );
+
+            await storeDecryptedMessage(
+              sigInfo.signature, blockTime, senderAddress,
+              senderAddress, myAddress, plaintext, false,
+            );
+            affectedPeers.add(senderAddress);
+          }
+          // Outgoing message from us
+          else if (senderAddress === myAddress && embeddedRecipientAddress !== myAddress) {
+            const recipientPubKeyBytes = new PublicKey(embeddedRecipientAddress).toBytes();
+            const plaintext = decryptOwnMessage(
+              memoData,
+              walletKeypair.secretKey,
+              recipientPubKeyBytes,
+            );
+
+            await storeDecryptedMessage(
+              sigInfo.signature, blockTime, embeddedRecipientAddress,
+              myAddress, embeddedRecipientAddress, plaintext, true,
+            );
+            affectedPeers.add(embeddedRecipientAddress);
+          }
+        } catch {
+          continue;
+        }
+      } else if (payloadType === 'read_receipt' && senderAddress !== myAddress) {
+        try {
+          const senderPubKeyBytes = new PublicKey(senderAddress).toBytes();
+          const ackedSignatures = decryptReadReceipt(
+            memoData,
+            walletKeypair.secretKey,
+            senderPubKeyBytes,
+          );
+          for (const ackedSig of ackedSignatures) {
+            await updateMessageReadStatus(ackedSig, 'read');
+          }
+          affectedPeers.add(senderAddress);
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // Save the most recent signature as last processed
+  if (signatures.length > 0) {
+    await saveLastProcessedSignature(signatures[0].signature);
+  }
+
+  return [...affectedPeers];
+}
+
+/**
+ * Fetch messages from on-chain transaction history for a specific conversation.
+ * Used when opening a conversation to catch up on messages with a specific peer.
  */
 export async function fetchOnChainMessages(
   peerAddress: string,
@@ -217,9 +446,13 @@ async function storeDecryptedMessage(
 
   // Detect payment messages
   let messageType: 'text' | 'payment' = 'text';
+  let displayText = plaintext;
   try {
     const parsed = JSON.parse(plaintext);
-    if (parsed.type === 'payment') messageType = 'payment';
+    if (parsed.type === 'payment') {
+      messageType = 'payment';
+      displayText = `Sent ${parsed.amount} ${parsed.token}`;
+    }
   } catch { /* text message */ }
 
   await insertMessage({
@@ -240,7 +473,7 @@ async function storeDecryptedMessage(
     peer_address: conversationId,
     peer_name: null,
     peer_enc_pubkey: null,
-    last_message_text: plaintext,
+    last_message_text: messageType === 'payment' ? displayText : plaintext,
     last_message_time: timestamp,
     ...(!isMine ? {unread_count: 1} : {}),
   });
@@ -295,6 +528,24 @@ export async function sendReadReceipts(
     }
   } catch (err) {
     console.warn('Failed to send read receipt:', err);
+  }
+}
+
+// --- Persistence for last processed signature ---
+
+async function saveLastProcessedSignature(sig: string): Promise<void> {
+  try {
+    await secureStore(LAST_SIGNATURE_KEY, sig);
+  } catch {
+    // Non-critical — worst case we re-process some transactions
+  }
+}
+
+async function loadLastProcessedSignature(): Promise<string | null> {
+  try {
+    return await secureRetrieve(LAST_SIGNATURE_KEY);
+  } catch {
+    return null;
   }
 }
 

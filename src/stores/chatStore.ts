@@ -7,12 +7,14 @@
 import {create} from 'zustand';
 import {
   sendMessage,
+  processTransaction,
+  fetchAllNewMessages,
   fetchOnChainMessages,
   sendReadReceipts,
 } from '../features/messaging/services/messageService';
 import {
-  subscribeToConversation,
-  unsubscribeAll,
+  startGlobalListener,
+  stopGlobalListener,
   reconnectIfNeeded,
 } from '../features/messaging/services/subscriptionService';
 import {
@@ -32,6 +34,7 @@ interface ChatState {
   isLoadingMessages: boolean;
   isLoadingConversations: boolean;
   isFetchingOnChain: boolean;
+  isGlobalListenerActive: boolean;
   error: string | null;
 
   // Actions
@@ -39,12 +42,15 @@ interface ChatState {
   loadMessages: (conversationId: string) => Promise<void>;
   sendMessage: (recipientAddress: string, plaintext: string) => Promise<void>;
   fetchNewMessages: (peerAddress: string) => Promise<void>;
+  fetchAllMessages: () => Promise<void>;
   markRead: (conversationId: string) => Promise<void>;
   setCurrentConversation: (id: string | null) => void;
   clearError: () => void;
-  subscribeToChat: (myAddress: string, peerAddress: string) => Promise<void>;
-  unsubscribeFromChat: () => Promise<void>;
-  reconnectChat: () => Promise<void>;
+
+  // Global listener
+  startListener: (myAddress: string) => Promise<void>;
+  stopListener: () => Promise<void>;
+  reconnectListener: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -55,6 +61,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoadingMessages: false,
   isLoadingConversations: false,
   isFetchingOnChain: false,
+  isGlobalListenerActive: false,
   error: null,
 
   loadConversations: async () => {
@@ -132,17 +139,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  /** Fetch messages for a specific conversation (peer-specific scan) */
   fetchNewMessages: async (peerAddress: string) => {
     const {isFetchingOnChain} = get();
-    if (isFetchingOnChain) return; // Prevent concurrent fetches
+    if (isFetchingOnChain) return;
 
     try {
       set({isFetchingOnChain: true});
 
-      // Fetch messages from on-chain transaction history
       await fetchOnChainMessages(peerAddress);
 
-      // Refresh local messages list
       get().loadMessages(peerAddress);
       get().loadConversations();
 
@@ -150,6 +156,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err: any) {
       set({isFetchingOnChain: false});
       console.warn('Failed to fetch on-chain messages:', err.message);
+    }
+  },
+
+  /** Global catch-up: fetch ALL new messages across all conversations */
+  fetchAllMessages: async () => {
+    const {isFetchingOnChain} = get();
+    if (isFetchingOnChain) return;
+
+    try {
+      set({isFetchingOnChain: true});
+
+      const affectedPeers = await fetchAllNewMessages();
+
+      // Refresh UI if any new messages were found
+      if (affectedPeers.length > 0) {
+        get().loadConversations();
+
+        // If we're currently viewing a conversation that was affected, refresh it
+        const currentId = get().currentConversationId;
+        if (currentId && affectedPeers.includes(currentId)) {
+          get().loadMessages(currentId);
+        }
+      }
+
+      set({isFetchingOnChain: false});
+    } catch (err: any) {
+      set({isFetchingOnChain: false});
+      console.warn('Failed to fetch all messages:', err.message);
     }
   },
 
@@ -167,22 +201,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  /** Subscribe to WebSocket logs for real-time message detection */
-  subscribeToChat: async (myAddress: string, peerAddress: string) => {
-    await subscribeToConversation(myAddress, peerAddress, () => {
-      // When a new memo tx is detected, fetch and decrypt it
-      get().fetchNewMessages(peerAddress);
+  /**
+   * Start the global WebSocket listener on the user's wallet address.
+   * Should be called once on app launch after wallet is loaded.
+   * Detects ALL incoming memo transactions across every conversation.
+   */
+  startListener: async (myAddress: string) => {
+    // First, do a catch-up scan for any messages missed while app was closed
+    get().fetchAllMessages();
+
+    // Then start the real-time WebSocket listener
+    await startGlobalListener(myAddress, async (txSignature: string) => {
+      if (!txSignature) {
+        // Empty signature = fallback poll trigger
+        get().fetchAllMessages();
+        return;
+      }
+
+      // Process the specific transaction detected by WebSocket
+      const peerAddress = await processTransaction(txSignature);
+
+      if (peerAddress) {
+        // Refresh the conversations list (new message count, preview)
+        get().loadConversations();
+
+        // If we're currently viewing this conversation, refresh messages
+        const currentId = get().currentConversationId;
+        if (currentId === peerAddress) {
+          get().loadMessages(currentId);
+        }
+      }
     });
+
+    set({isGlobalListenerActive: true});
   },
 
-  /** Unsubscribe from WebSocket logs */
-  unsubscribeFromChat: async () => {
-    await unsubscribeAll();
+  /** Stop the global listener (e.g. on logout) */
+  stopListener: async () => {
+    await stopGlobalListener();
+    set({isGlobalListenerActive: false});
   },
 
-  /** Reconnect WebSocket after app foreground */
-  reconnectChat: async () => {
-    await reconnectIfNeeded();
+  /** Reconnect WebSocket after app comes to foreground */
+  reconnectListener: async () => {
+    const shouldPoll = await reconnectIfNeeded();
+    if (shouldPoll) {
+      // Catch up on any messages missed while backgrounded
+      get().fetchAllMessages();
+    }
   },
 
   setCurrentConversation: (id: string | null) => {

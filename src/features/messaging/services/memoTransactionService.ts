@@ -7,6 +7,7 @@
 import {
   Keypair,
   PublicKey,
+  SystemProgram,
   Transaction,
   TransactionInstruction,
   sendAndConfirmTransaction,
@@ -17,6 +18,11 @@ import {MEMO_PROGRAM_ID, MEMO_MAX_BYTES} from '../../../core/solana/constants';
 /**
  * Build and send a Solana transaction containing an encrypted message
  * in a Memo instruction.
+ *
+ * The transaction includes a 0-lamport SOL transfer to the recipient so that
+ * the recipient's wallet address appears in the transaction's account keys.
+ * This is critical — it allows the recipient's `connection.onLogs()` WebSocket
+ * subscription to detect the transaction in real-time.
  */
 export async function sendEncryptedMemoTransaction(
   senderKeypair: Keypair,
@@ -37,7 +43,17 @@ export async function sendEncryptedMemoTransaction(
 
   const transaction = new Transaction();
 
-  // Memo instruction — only sender as signer (Memo requires all account keys to be signers)
+  // 1. Transfer 0 lamports to the recipient — this puts their address in the
+  //    transaction's account keys so their onLogs() subscription detects it.
+  transaction.add(
+    SystemProgram.transfer({
+      fromPubkey: senderKeypair.publicKey,
+      toPubkey: recipientPubkey,
+      lamports: 0,
+    }),
+  );
+
+  // 2. Memo instruction with encrypted payload (sender as signer)
   const memoInstruction = new TransactionInstruction({
     keys: [
       {pubkey: senderKeypair.publicKey, isSigner: true, isWritable: true},

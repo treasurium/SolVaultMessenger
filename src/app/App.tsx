@@ -17,6 +17,7 @@ import Providers from './providers';
 import AppNavigation from './navigation';
 import {useWalletStore} from '../stores/walletStore';
 import {useAuthStore} from '../stores/authStore';
+import {useChatStore} from '../stores/chatStore';
 import {SolVaultAppIcon} from '../shared/components';
 import {
   isBiometricEnabled,
@@ -53,18 +54,35 @@ function LockScreen({onUnlock}: {onUnlock: () => void}) {
 }
 
 function AppContent() {
-  const {isInitialized, isLoading: walletLoading, initialize: initWallet} =
+  const {isInitialized, isLoading: walletLoading, publicKey, initialize: initWallet} =
     useWalletStore();
   const {initialize: initAuth, isLoading: authLoading} = useAuthStore();
+  const {startListener, reconnectListener, stopListener} = useChatStore();
 
   const [isLocked, setIsLocked] = useState(false);
   const [biometricChecked, setBiometricChecked] = useState(false);
   const appState = useRef(AppState.currentState);
+  const listenerStarted = useRef(false);
 
   useEffect(() => {
     initAuth();
     initWallet();
   }, []);
+
+  // Start global message listener when wallet is ready
+  useEffect(() => {
+    if (isInitialized && publicKey && !listenerStarted.current) {
+      listenerStarted.current = true;
+      startListener(publicKey);
+    }
+
+    return () => {
+      if (listenerStarted.current) {
+        listenerStarted.current = false;
+        stopListener();
+      }
+    };
+  }, [isInitialized, publicKey]);
 
   // Check biometric on initial app launch
   useEffect(() => {
@@ -82,7 +100,7 @@ function AppContent() {
     })();
   }, []);
 
-  // Biometric lock when app returns from background
+  // Biometric lock + reconnect listener when app returns from background
   useEffect(() => {
     const subscription = AppState.addEventListener(
       'change',
@@ -95,12 +113,17 @@ function AppContent() {
           if (enabled) {
             setIsLocked(true);
           }
+
+          // Reconnect WebSocket and catch up on missed messages
+          if (isInitialized && publicKey) {
+            reconnectListener();
+          }
         }
         appState.current = nextState;
       },
     );
     return () => subscription.remove();
-  }, []);
+  }, [isInitialized, publicKey]);
 
   const isLoading = walletLoading || authLoading || !biometricChecked;
 

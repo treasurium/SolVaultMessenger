@@ -4,13 +4,14 @@
  * Licensed under GPLv3 - see LICENSE file
  */
 // src/features/messaging/services/subscriptionService.ts
-// WebSocket subscriptions via connection.onLogs() for real-time message detection.
+// Global WebSocket listener on the user's own wallet address.
+// Detects ALL incoming memo transactions in real-time across every conversation.
 // Includes auto-reconnect with exponential backoff, health checks, and polling fallback.
 
 import {PublicKey} from '@solana/web3.js';
 import {getConnection} from '../../../core/solana/connection';
 
-type LogCallback = () => void;
+type NewMessageCallback = (txSignature: string) => void;
 
 const MEMO_PROGRAM_ID_STR = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -18,7 +19,7 @@ const HEALTH_CHECK_INTERVAL = 30_000; // 30 seconds
 const FALLBACK_POLL_INTERVAL = 5_000; // 5 seconds (only used after WS failure)
 
 // --- State ---
-let activeSubscriptionIds: number[] = [];
+let activeSubscriptionId: number | null = null;
 let isSubscribed = false;
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -27,88 +28,83 @@ let fallbackPollTimer: ReturnType<typeof setInterval> | null = null;
 
 // Saved params for reconnection
 let savedMyAddress: string | null = null;
-let savedPeerAddress: string | null = null;
-let savedCallback: LogCallback | null = null;
+let savedCallback: NewMessageCallback | null = null;
+
+// Track processed signatures to avoid duplicates
+const processedSignatures = new Set<string>();
+const MAX_PROCESSED_CACHE = 500;
+
+function addProcessedSignature(sig: string): void {
+  processedSignatures.add(sig);
+  // Evict oldest entries if cache grows too large
+  if (processedSignatures.size > MAX_PROCESSED_CACHE) {
+    const iterator = processedSignatures.values();
+    const oldest = iterator.next().value;
+    if (oldest) processedSignatures.delete(oldest);
+  }
+}
 
 /**
- * Subscribe to on-chain logs for both our address and the peer's address.
- * When a Memo transaction is detected, fires the callback so the store
- * can fetch and decrypt the new message.
+ * Start a global WebSocket listener on the user's own wallet address.
+ * Fires the callback with the tx signature whenever a new memo transaction
+ * is detected that involves the user's wallet. This works because:
  *
- * Includes auto-reconnect with exponential backoff and health monitoring.
+ * 1. Outgoing messages: user is the signer/fee-payer
+ * 2. Incoming messages: recipient address is included via SystemProgram.transfer(0)
+ *
+ * The callback receives the transaction signature so the caller can fetch,
+ * decrypt, and store the message.
  */
-export async function subscribeToConversation(
+export async function startGlobalListener(
   myAddress: string,
-  peerAddress: string,
-  onNewTransaction: LogCallback,
+  onNewMemoTransaction: NewMessageCallback,
 ): Promise<void> {
   // Save params for reconnection
   savedMyAddress = myAddress;
-  savedPeerAddress = peerAddress;
-  savedCallback = onNewTransaction;
+  savedCallback = onNewMemoTransaction;
 
-  // Clean up any existing subscriptions first
-  await cleanupSubscriptions();
+  // Clean up any existing subscription first
+  await cleanupSubscription();
 
-  await setupSubscriptions();
+  await setupSubscription();
 }
 
-/** Internal: set up the actual WebSocket subscriptions */
-async function setupSubscriptions(): Promise<void> {
-  if (!savedMyAddress || !savedPeerAddress || !savedCallback) return;
+/** Internal: set up the actual WebSocket subscription */
+async function setupSubscription(): Promise<void> {
+  if (!savedMyAddress || !savedCallback) return;
 
   const myAddress = savedMyAddress;
-  const peerAddress = savedPeerAddress;
-  const onNewTransaction = savedCallback;
-
-  // Debounce: avoid firing callback multiple times for the same tx
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  const debouncedCallback = () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      onNewTransaction();
-    }, 1500);
-  };
+  const onNewMemoTransaction = savedCallback;
 
   try {
     const connection = await getConnection();
 
-    // Subscribe to logs that mention the Memo program for our address
-    const mySubId = connection.onLogs(
+    // Subscribe to logs for our own wallet address.
+    // This fires for every transaction that involves our address as an account key.
+    const subId = connection.onLogs(
       new PublicKey(myAddress),
       logs => {
         if (logs.err) return;
+
+        // Check if this transaction involves the Memo program
         const hasMemo = logs.logs.some(
           log =>
             log.includes(MEMO_PROGRAM_ID_STR) ||
             log.includes('Program log: Memo'),
         );
+
         if (hasMemo) {
-          debouncedCallback();
+          const sig = logs.signature;
+          if (!processedSignatures.has(sig)) {
+            addProcessedSignature(sig);
+            onNewMemoTransaction(sig);
+          }
         }
       },
       'confirmed',
     );
-    activeSubscriptionIds.push(mySubId);
 
-    // Subscribe to logs for the peer's address
-    const peerSubId = connection.onLogs(
-      new PublicKey(peerAddress),
-      logs => {
-        if (logs.err) return;
-        const hasMemo = logs.logs.some(
-          log =>
-            log.includes(MEMO_PROGRAM_ID_STR) ||
-            log.includes('Program log: Memo'),
-        );
-        if (hasMemo) {
-          debouncedCallback();
-        }
-      },
-      'confirmed',
-    );
-    activeSubscriptionIds.push(peerSubId);
-
+    activeSubscriptionId = subId;
     isSubscribed = true;
     reconnectAttempts = 0;
 
@@ -117,8 +113,10 @@ async function setupSubscriptions(): Promise<void> {
 
     // Start health monitoring
     startHealthCheck();
+
+    console.log('[WS] Global listener started for', myAddress.slice(0, 8) + '...');
   } catch (err) {
-    console.warn('[WS] Subscription setup failed:', err);
+    console.warn('[WS] Global listener setup failed:', err);
     scheduleReconnect();
   }
 }
@@ -130,16 +128,14 @@ function startHealthCheck(): void {
   healthCheckTimer = setInterval(async () => {
     try {
       const connection = await getConnection();
-      // Access internal WebSocket state to check if connection is alive
       const ws = (connection as any)?._rpcWebSocket?._ws;
       if (ws && ws.readyState !== 1 /* WebSocket.OPEN */) {
         console.warn('[WS] WebSocket not open (state:', ws.readyState, '), reconnecting');
-        await cleanupSubscriptions();
+        await cleanupSubscription();
         scheduleReconnect();
       }
     } catch {
-      // Can't check state — try reconnecting to be safe
-      await cleanupSubscriptions();
+      await cleanupSubscription();
       scheduleReconnect();
     }
   }, HEALTH_CHECK_INTERVAL);
@@ -154,7 +150,7 @@ function stopHealthCheck(): void {
 
 /** Schedule a reconnect with exponential backoff */
 function scheduleReconnect(): void {
-  if (reconnectTimer) return; // Already scheduled
+  if (reconnectTimer) return;
 
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     console.warn('[WS] Max reconnect attempts reached, falling back to polling');
@@ -162,22 +158,22 @@ function scheduleReconnect(): void {
     return;
   }
 
-  // Exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 30s
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30_000);
   reconnectAttempts++;
 
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
-    await setupSubscriptions();
+    await setupSubscription();
   }, delay);
 }
 
 /** Start polling as a fallback when WebSocket is completely dead */
 function startFallbackPolling(): void {
-  if (fallbackPollTimer) return; // Already polling
+  if (fallbackPollTimer) return;
 
   fallbackPollTimer = setInterval(() => {
-    savedCallback?.();
+    // Fire callback with empty string to signal "do a full poll"
+    savedCallback?.('');
   }, FALLBACK_POLL_INTERVAL);
 }
 
@@ -188,32 +184,30 @@ function stopFallbackPolling(): void {
   }
 }
 
-/** Clean up WebSocket subscriptions without clearing saved params */
-async function cleanupSubscriptions(): Promise<void> {
+/** Clean up WebSocket subscription without clearing saved params */
+async function cleanupSubscription(): Promise<void> {
   stopHealthCheck();
 
-  if (activeSubscriptionIds.length > 0) {
+  if (activeSubscriptionId !== null) {
     try {
       const connection = await getConnection();
-      for (const subId of activeSubscriptionIds) {
-        try {
-          connection.removeOnLogsListener(subId);
-        } catch {
-          // Ignore cleanup errors
-        }
+      try {
+        connection.removeOnLogsListener(activeSubscriptionId);
+      } catch {
+        // Ignore cleanup errors
       }
     } catch {
-      // Connection unavailable, subscriptions are already dead
+      // Connection unavailable, subscription is already dead
     }
   }
 
-  activeSubscriptionIds = [];
+  activeSubscriptionId = null;
   isSubscribed = false;
 }
 
-/** Remove all subscriptions and stop all timers. Full teardown. */
-export async function unsubscribeAll(): Promise<void> {
-  await cleanupSubscriptions();
+/** Stop the global listener completely. Full teardown. */
+export async function stopGlobalListener(): Promise<void> {
+  await cleanupSubscription();
   stopFallbackPolling();
 
   if (reconnectTimer) {
@@ -223,23 +217,22 @@ export async function unsubscribeAll(): Promise<void> {
 
   reconnectAttempts = 0;
   savedMyAddress = null;
-  savedPeerAddress = null;
   savedCallback = null;
+  processedSignatures.clear();
 }
 
-/** Attempt to reconnect after app comes to foreground */
-export async function reconnectIfNeeded(): Promise<void> {
-  if (!savedMyAddress || !savedPeerAddress || !savedCallback) return;
+/** Reconnect after app comes to foreground. Returns true if a poll is needed. */
+export async function reconnectIfNeeded(): Promise<boolean> {
+  if (!savedMyAddress || !savedCallback) return false;
 
-  // If already connected, just do a health check
+  // If already connected, check health
   if (isSubscribed) {
     try {
       const connection = await getConnection();
       const ws = (connection as any)?._rpcWebSocket?._ws;
       if (ws && ws.readyState === 1) {
-        // WS is healthy, just trigger a manual fetch for missed messages
-        savedCallback();
-        return;
+        // WS is healthy, caller should still poll for missed messages
+        return true;
       }
     } catch {
       // Fall through to reconnect
@@ -248,12 +241,11 @@ export async function reconnectIfNeeded(): Promise<void> {
 
   // Reconnect
   reconnectAttempts = 0;
-  await cleanupSubscriptions();
+  await cleanupSubscription();
   stopFallbackPolling();
-  await setupSubscriptions();
+  await setupSubscription();
 
-  // Also trigger a fetch for any messages missed while backgrounded
-  savedCallback?.();
+  return true; // Caller should poll for missed messages
 }
 
 export function isActivelySubscribed(): boolean {

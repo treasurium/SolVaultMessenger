@@ -17,7 +17,6 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
-  AppState,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {ScreenContainer} from '../../../shared/components';
@@ -38,7 +37,8 @@ import PaymentBubble from '../components/PaymentBubble';
 
 type Props = NativeStackScreenProps<ChatStackParamList, 'Conversation'>;
 
-// Polling is now handled internally by subscriptionService (5s fallback after WS failure)
+// Real-time delivery handled by global WebSocket listener in App.tsx (via chatStore.startListener)
+// When new messages arrive for this conversation, the global listener auto-refreshes the UI
 
 /** Check if a plaintext message is a payment JSON */
 function parsePayment(plaintext: string) {
@@ -63,9 +63,7 @@ export default function ConversationScreen({navigation, route}: Props) {
     sendMessage,
     markRead,
     fetchNewMessages,
-    subscribeToChat,
-    unsubscribeFromChat,
-    reconnectChat,
+    setCurrentConversation,
   } = useChatStore();
   const {publicKey, sendToken, refreshBalance} = useWalletStore();
   const {resolveAddress} = useContactsStore();
@@ -79,32 +77,17 @@ export default function ConversationScreen({navigation, route}: Props) {
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
+    // Tell the store which conversation is active (for global listener auto-refresh)
+    setCurrentConversation(peerAddress);
+
     loadMessages(peerAddress);
     markRead(peerAddress);
     fetchNewMessages(peerAddress);
 
-    if (publicKey) {
-      subscribeToChat(publicKey, peerAddress);
-    }
-
     return () => {
-      unsubscribeFromChat();
+      setCurrentConversation(null);
     };
   }, [peerAddress, publicKey]);
-
-  // Reconnect WebSocket + fetch missed messages when app returns to foreground
-  useEffect(() => {
-    const appState = AppState.currentState;
-    const subscription = AppState.addEventListener('change', nextState => {
-      if (
-        appState.match(/inactive|background/) &&
-        nextState === 'active'
-      ) {
-        reconnectChat();
-      }
-    });
-    return () => subscription.remove();
-  }, []);
 
   useEffect(() => {
     navigation.setOptions({
