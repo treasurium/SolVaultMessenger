@@ -80,9 +80,16 @@ export default function ConversationScreen({navigation, route}: Props) {
     // Tell the store which conversation is active (for global listener auto-refresh)
     setCurrentConversation(peerAddress);
 
+    // Load messages from local DB first (instant)
     loadMessages(peerAddress);
+
+    // Send read receipts for messages already in local DB
     markRead(peerAddress);
-    fetchNewMessages(peerAddress);
+
+    // Fetch any new messages from on-chain, then send receipts for those too
+    fetchNewMessages(peerAddress).then(() => {
+      markRead(peerAddress);
+    });
 
     return () => {
       setCurrentConversation(null);

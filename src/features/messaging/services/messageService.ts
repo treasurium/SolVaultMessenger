@@ -98,14 +98,20 @@ export async function sendMessage(
   return {txSignature, messageId};
 }
 
+/** Result from processing a single transaction */
+export interface ProcessedTxResult {
+  peerAddress: string;
+  type: 'incoming_message' | 'outgoing_message' | 'read_receipt';
+}
+
 /**
  * Process a single transaction by signature.
  * Called by the global WebSocket listener when a new memo tx is detected.
- * Returns the peer address if a message was successfully processed (for UI refresh).
+ * Returns the peer address and type if successfully processed (for UI refresh + receipts).
  */
 export async function processTransaction(
   signature: string,
-): Promise<string | null> {
+): Promise<ProcessedTxResult | null> {
   if (!signature) return null;
 
   const walletKeypair = await getWalletKeypair();
@@ -156,7 +162,7 @@ export async function processTransaction(
           // Save as last processed signature
           await saveLastProcessedSignature(signature);
 
-          return senderAddress; // peer address for UI refresh
+          return {peerAddress: senderAddress, type: 'incoming_message'};
         }
 
         // Case 2: We sent a message (e.g. from another device or just confirmed)
@@ -175,7 +181,7 @@ export async function processTransaction(
 
           await saveLastProcessedSignature(signature);
 
-          return embeddedRecipientAddress;
+          return {peerAddress: embeddedRecipientAddress, type: 'outgoing_message'};
         }
       } catch {
         return null;
@@ -192,7 +198,7 @@ export async function processTransaction(
           await updateMessageReadStatus(ackedSig, 'read');
         }
         await saveLastProcessedSignature(signature);
-        return senderAddress;
+        return {peerAddress: senderAddress, type: 'read_receipt'};
       } catch {
         // Not a valid read receipt for us
       }

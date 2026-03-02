@@ -11,6 +11,7 @@ import {
   fetchAllNewMessages,
   fetchOnChainMessages,
   sendReadReceipts,
+  type ProcessedTxResult,
 } from '../features/messaging/services/messageService';
 import {
   startGlobalListener,
@@ -173,10 +174,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (affectedPeers.length > 0) {
         get().loadConversations();
 
-        // If we're currently viewing a conversation that was affected, refresh it
+        // If we're currently viewing a conversation that was affected, refresh + mark read
         const currentId = get().currentConversationId;
         if (currentId && affectedPeers.includes(currentId)) {
           get().loadMessages(currentId);
+          markConversationRead(currentId).catch(() => {});
+          sendReadReceipts(currentId).catch(err =>
+            console.warn('Catch-up read receipt failed:', err),
+          );
         }
       }
 
@@ -219,16 +224,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       // Process the specific transaction detected by WebSocket
-      const peerAddress = await processTransaction(txSignature);
+      const result: ProcessedTxResult | null = await processTransaction(txSignature);
 
-      if (peerAddress) {
+      if (result) {
         // Refresh the conversations list (new message count, preview)
         get().loadConversations();
 
         // If we're currently viewing this conversation, refresh messages
         const currentId = get().currentConversationId;
-        if (currentId === peerAddress) {
+        if (currentId === result.peerAddress) {
           get().loadMessages(currentId);
+
+          // Auto-send read receipt for incoming messages in the active conversation
+          if (result.type === 'incoming_message') {
+            markConversationRead(currentId).catch(() => {});
+            sendReadReceipts(currentId).catch(err =>
+              console.warn('Auto read receipt failed:', err),
+            );
+          }
         }
       }
     });
