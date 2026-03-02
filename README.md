@@ -175,6 +175,19 @@ SolVault Messenger is open-source cryptographic software provided as-is. The dev
 
 See [DISCLAIMER](DISCLAIMER) for full legal notice.
 
+## Support the Project
+
+SolVault Messenger is free, open-source software. If you find it useful, consider supporting development:
+
+**Solana Wallet (SOL / USDC / USDT):**
+```
+6oNt9EBU6L64d1zqsH4WgmykpXsgfbj7rhZwDgVeNV4T
+```
+
+**Sign up with our sponsor:** [BitUnix](https://www.bitunix.com/register?vipCode=TreasuriumAICorp)
+
+All donations go directly toward continued development, security audits, and keeping SolVault free for everyone.
+
 ---
 
 **SolVault Messenger** — Your messages. Your keys. Your freedom.
